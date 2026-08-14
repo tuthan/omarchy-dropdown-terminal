@@ -3,6 +3,8 @@
 An Omarchy Quickshell plugin that toggles the configured default terminal as a
 floating overlay on the current Hyprland workspace.
 
+![Dropdown Terminal preview](preview.png)
+
 ## Install
 
 From the plugin repository:
