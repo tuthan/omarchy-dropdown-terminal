@@ -4,7 +4,7 @@ import qs.Ui
 
 BarWidget {
   id: root
-  moduleName: "hvo.dropdown-terminal"
+  moduleName: "io.github.tuthan.dropdown-terminal"
 
   Service { id: service }
 

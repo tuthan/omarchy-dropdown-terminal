@@ -14,7 +14,7 @@ Item {
   // This registers an action with Hyprland. The physical key is normally
   // configured by the user; the optional right-click installer is explicit.
   GlobalShortcut {
-    appid: "hvo.dropdown-terminal"
+    appid: "io.github.tuthan.dropdown-terminal"
     name: "toggle"
     description: "Toggle the dropdown terminal"
     onPressed: root.toggle()

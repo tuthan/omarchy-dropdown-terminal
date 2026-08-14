@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "hvo.dropdown-terminal",
+  "id": "io.github.tuthan.dropdown-terminal",
   "name": "Dropdown Terminal",
   "version": "0.1.0",
   "author": "hvo",
+  "license": "MIT",
   "description": "Summon the configured default terminal in a floating special workspace",
   "kinds": [
     "bar-widget"
@@ -15,6 +16,7 @@
     "displayName": "Dropdown Terminal",
     "description": "Toggle the default terminal as a dropdown",
     "category": "Utilities",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "defaultSection": "right"
   }
 }

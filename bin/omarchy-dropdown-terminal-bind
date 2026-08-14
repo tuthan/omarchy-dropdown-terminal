@@ -3,12 +3,12 @@
 set -u
 
 config="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua"
-line='hl.bind("CTRL + GRAVE", hl.dsp.global("hvo.dropdown-terminal:toggle"))'
+line='hl.bind("CTRL + GRAVE", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))'
 
 mkdir -p "$(dirname "$config")"
 
 # Do not add a duplicate if the user already installed this action manually.
-if [[ -f "$config" ]] && grep -Fq 'hvo.dropdown-terminal:toggle' "$config"; then
+if [[ -f "$config" ]] && grep -Fq 'io.github.tuthan.dropdown-terminal:toggle' "$config"; then
   notify-send "Dropdown Terminal" "Ctrl + Grave is already bound" >/dev/null 2>&1 || true
   exit 0
 fi
