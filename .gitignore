@@ -1,0 +1,13 @@
+# Runtime and local editor files
+*.log
+*.bak
+*.bak.*
+*.swp
+*.swo
+.DS_Store
+.idea/
+.vscode/
+
+# Generated or local-only plugin state
+/.codex/
+/dist/

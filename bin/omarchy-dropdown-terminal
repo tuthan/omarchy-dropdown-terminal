@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+
+set -u
+
+hidden_workspace="dropdown-terminal-hidden"
+state_file="${XDG_RUNTIME_DIR:-/tmp}/omarchy-dropdown-terminal.previous-workspace"
+address_file="${XDG_RUNTIME_DIR:-/tmp}/omarchy-dropdown-terminal.address"
+
+hl_dispatch() {
+  hyprctl eval "hl.dispatch($1)"
+}
+
+client_exists() {
+  local address="$1"
+  hyprctl clients -j 2>/dev/null \
+    | jq -e --arg address "$address" 'any(.[]; .address == $address)' >/dev/null 2>&1
+}
+
+client_workspace() {
+  local address="$1"
+  hyprctl clients -j 2>/dev/null \
+    | jq -r --arg address "$address" '.[] | select(.address == $address) | .workspace.name' \
+    | head -n 1
+}
+
+workspace_selector() {
+  local workspace="$1"
+  if [[ "$workspace" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$workspace"
+  else
+    printf 'name:%s' "$workspace"
+  fi
+}
+
+active_workspace="$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.name // "1"')"
+terminal_address="$(cat "$address_file" 2>/dev/null || true)"
+
+# Recover the tracked client after shell restarts. Also migrate a client left
+# in the old visible workspace used by earlier plugin versions.
+if [[ -z "$terminal_address" ]] || ! client_exists "$terminal_address"; then
+  terminal_address="$(hyprctl clients -j 2>/dev/null | jq -r --arg hidden "$hidden_workspace" \
+    '.[] | select(.workspace.name == $hidden) | .address' | head -n 1)"
+fi
+if [[ -z "$terminal_address" ]]; then
+  terminal_address="$(hyprctl clients -j 2>/dev/null | jq -r \
+    '.[] | select(.workspace.name == "dropdown-terminal") | .address' | head -n 1)"
+fi
+
+if [[ -n "$terminal_address" ]] && client_exists "$terminal_address"; then
+  printf '%s\n' "$terminal_address" > "$address_file"
+  terminal_workspace="$(client_workspace "$terminal_address")"
+
+  if [[ "$terminal_workspace" == "$hidden_workspace" ]]; then
+    # Show it on the workspace the user is currently using.
+    target_workspace="$(workspace_selector "$active_workspace")"
+    printf '%s\n' "$active_workspace" > "$state_file"
+    hl_dispatch "hl.dsp.window.move({ workspace = \"$target_workspace\", follow = false, window = \"address:$terminal_address\" })" >/dev/null
+    hl_dispatch "hl.dsp.focus({ window = \"address:$terminal_address\" })" >/dev/null
+  else
+    # Hide it without changing the user's current workspace.
+    printf '%s\n' "$terminal_workspace" > "$state_file"
+    hl_dispatch "hl.dsp.window.move({ workspace = \"name:$hidden_workspace\", follow = false, window = \"address:$terminal_address\" })" >/dev/null
+  fi
+  exit $?
+fi
+
+before_clients="$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)"
+target_workspace="$(workspace_selector "$active_workspace")"
+
+# Launch through Omarchy so xdg-terminal-exec selects the configured emulator.
+omarchy launch terminal >/dev/null 2>&1 &
+
+for _ in $(seq 1 40); do
+  current="$(hyprctl clients -j 2>/dev/null | jq -r --arg before "$before_clients" '
+    .[] | .address as $address
+    | select((($before | split("\n")) | index($address)) == null)
+    | $address' | head -n 1)"
+  current="${current:-0x0}"
+
+  if [[ "$current" != "0x0" ]]; then
+    monitor_width="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .width' | head -n 1)"
+    monitor_height="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .height' | head -n 1)"
+    [[ "$monitor_width" =~ ^[0-9]+$ ]] || monitor_width=1920
+    [[ "$monitor_height" =~ ^[0-9]+$ ]] || monitor_height=1080
+    window_width=$((monitor_width * 90 / 100))
+    window_height=$((monitor_height * 45 / 100))
+    top_margin=40
+    window_x=$(((monitor_width - window_width) / 2))
+
+    printf '%s\n' "$current" > "$address_file"
+    printf '%s\n' "$active_workspace" > "$state_file"
+    hl_dispatch "hl.dsp.focus({ window = \"address:$current\" })" >/dev/null
+    hl_dispatch "hl.dsp.window.float({ action = \"set\", window = \"address:$current\" })" >/dev/null
+    hl_dispatch "hl.dsp.window.resize({ x = $window_width, y = $window_height, window = \"address:$current\" })" >/dev/null
+    hl_dispatch "hl.dsp.window.move({ x = $window_x, y = $top_margin, relative = false, window = \"address:$current\" })" >/dev/null
+    exit $?
+  fi
+  sleep 0.1
+done
+
+exit 0
