@@ -80,12 +80,19 @@ for _ in $(seq 1 40); do
   if [[ "$current" != "0x0" ]]; then
     monitor_width="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .width' | head -n 1)"
     monitor_height="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .height' | head -n 1)"
+    monitor_scale="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .scale' | head -n 1)"
     [[ "$monitor_width" =~ ^[0-9]+$ ]] || monitor_width=1920
     [[ "$monitor_height" =~ ^[0-9]+$ ]] || monitor_height=1080
-    window_width=$((monitor_width * 90 / 100))
-    window_height=$((monitor_height * 45 / 100))
-    top_margin=40
-    window_x=$(((monitor_width - window_width) / 2))
+    [[ "$monitor_scale" =~ ^[0-9]+([.][0-9]+)?$ ]] || monitor_scale=1
+
+    # Hyprland scales integer resize/move values by monitor scale, so convert
+    # the focused monitor into logical space first and size from that.
+    logical_width="$(awk -v width="$monitor_width" -v scale="$monitor_scale" 'BEGIN { if (scale <= 0) scale = 1; printf "%d", width / scale }')"
+    logical_height="$(awk -v height="$monitor_height" -v scale="$monitor_scale" 'BEGIN { if (scale <= 0) scale = 1; printf "%d", height / scale }')"
+    window_width="$(awk -v width="$logical_width" 'BEGIN { printf "%d", width * 0.90 }')"
+    window_height="$(awk -v height="$logical_height" 'BEGIN { printf "%d", height * 0.45 }')"
+    top_margin="$(awk -v height="$logical_height" 'BEGIN { margin = height * 0.04; if (margin < 24) margin = 24; printf "%d", margin }')"
+    window_x=$(((logical_width - window_width) / 2))
 
     printf '%s\n' "$current" > "$address_file"
     printf '%s\n' "$active_workspace" > "$state_file"
