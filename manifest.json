@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaversion": 1,
   "id": "io.github.tuthan.dropdown-terminal",
-  "name": "Dropdown Terminal",
+  "name": "dropdown terminal",
   "version": "1.0.1",
-  "author": "hvo",
+  "author": "Hung Vo",
   "license": "MIT",
   "description": "Summon the configured default terminal in a floating special workspace",
   "kinds": [
