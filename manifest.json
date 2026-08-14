@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.tuthan.dropdown-terminal",
   "name": "Dropdown Terminal",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "author": "hvo",
   "license": "MIT",
   "description": "Summon the configured default terminal in a floating special workspace",

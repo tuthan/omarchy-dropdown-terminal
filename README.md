@@ -63,6 +63,8 @@ plugin backs up `bindings.lua`, appends the line, and reloads Hyprland.
   `dropdown-terminal-hidden`, without changing the user's current workspace.
 - Existing dropdown windows are detected after a shell restart, so they are
   reused instead of duplicated.
+- Runtime state is stored in `XDG_RUNTIME_DIR` when it is private; if that is
+  unavailable, the plugin creates a private per-user directory under `/tmp`.
 
 ## Remove
 
