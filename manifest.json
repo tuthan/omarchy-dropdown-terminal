@@ -1,7 +1,7 @@
 {
-  "schemaversion": 1,
+  "schemaVersion": 1,
   "id": "io.github.tuthan.dropdown-terminal",
-  "name": "dropdown terminal",
+  "name": "Dropdown Terminal",
   "version": "1.0.1",
   "author": "Hung Vo",
   "license": "MIT",
