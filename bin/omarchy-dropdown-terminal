@@ -9,6 +9,9 @@ die() {
   exit 1
 }
 
+action="${1:-toggle}"
+[[ "$action" == "toggle" || "$action" == "hide" ]] || die "unknown action: $action"
+
 is_private_dir() {
   local dir="$1"
   local mode
@@ -104,6 +107,19 @@ if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && clie
   printf '%s\n' "$terminal_address" > "$address_file"
   terminal_workspace="$(client_workspace "$terminal_address")"
   terminal_window="$(lua_string "address:$terminal_address")" || die "invalid terminal address"
+
+  if [[ "$action" == "hide" ]]; then
+    active_address="$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // ""')"
+    if [[ "$active_address" == "$terminal_address" || "$terminal_workspace" == "$hidden_workspace" ]]; then
+      exit 0
+    fi
+    printf '%s\n' "$terminal_workspace" > "$state_file"
+    # Moving into the hidden workspace can otherwise trigger a compositor
+    # window animation that briefly flashes the desktop.
+    hyprctl dispatch setprop "address:$terminal_address" noanim 1 >/dev/null 2>&1 || true
+    hl_dispatch "hl.dsp.window.move({ workspace = \"name:$hidden_workspace\", follow = false, window = $terminal_window })" >/dev/null
+    exit $?
+  fi
 
   if [[ "$terminal_workspace" == "$hidden_workspace" ]]; then
     # Show it on the workspace the user is currently using.

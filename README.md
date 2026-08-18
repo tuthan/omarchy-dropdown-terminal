@@ -20,14 +20,16 @@ plugin_dir="$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal"
 mkdir -p "$(dirname "$plugin_dir")"
 if [ -L "$plugin_dir" ]; then unlink "$plugin_dir"; fi
 mkdir -p "$plugin_dir"
-cp -a "$PWD"/. "$plugin_dir"/
+rsync -a --delete --exclude='.git/' "$PWD"/ "$plugin_dir"/
 omarchy-shell shell rescanPlugins
 omarchy plugin enable io.github.tuthan.dropdown-terminal --section right
 ```
 
 Omarchy expects a real plugin directory, so this setup copies the repository
-into the plugin directory instead of symlinking it. After making source
-changes, rerun the `cp` command and `omarchy-shell shell rescanPlugins`.
+into the plugin directory instead of symlinking it. The `.git` directory is
+excluded because it is not needed by the runtime and may be protected by
+Omarchy. After making source changes, rerun the `rsync` command and
+`omarchy-shell shell rescanPlugins`.
 
 The helper requires `jq`, `hyprctl`, and the Omarchy `omarchy` command.
 
@@ -44,7 +46,7 @@ For local development, recopy the repository into the real plugin directory
 and rescan it:
 
 ```bash
-cp -a "$PWD"/. "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal"/
+rsync -a --delete --exclude='.git/' "$PWD"/ "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal"/
 omarchy-shell shell rescanPlugins
 ```
 
@@ -74,9 +76,10 @@ symbol, for example:
 hl.bind("CTRL + code:41", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))
 ```
 
-The bar icon also provides a shortcut installer: right-click it to add the
-default `Ctrl + Grave` binding. If the binding is not already present, the
-plugin backs up `bindings.lua`, appends the line, and reloads Hyprland.
+The bar icon also provides shortcuts: right-click it to add the default
+`Ctrl + Grave` binding, or middle-click it to toggle auto-hide when the terminal
+loses focus. If the binding is not already present, the plugin backs up
+`bindings.lua`, appends the line, and reloads Hyprland.
 
 ## Configuration
 
@@ -100,6 +103,26 @@ the shell to apply it:
 ```bash
 omarchy restart shell
 ```
+
+Auto-hide can also be changed from a terminal:
+
+```bash
+# Enable auto-hide on focus loss
+omarchy bar set io.github.tuthan.dropdown-terminal autoHideOnFocusLoss true --json
+
+# Disable it
+omarchy bar set io.github.tuthan.dropdown-terminal autoHideOnFocusLoss false --json
+```
+
+The default auto-hide delay is 500 ms and can be adjusted from the widget
+settings or with:
+
+```bash
+omarchy bar set io.github.tuthan.dropdown-terminal autoHideDelayMs 500 --json
+```
+
+Hiding moves the terminal to the hidden workspace, so it uses Hyprland’s
+configured window-out animation.
 
 ## Behavior
 
