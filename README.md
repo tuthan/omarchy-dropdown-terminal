@@ -16,12 +16,37 @@ omarchy plugin add https://github.com/tuthan/omarchy-dropdown-terminal.git --ena
 For local development:
 
 ```bash
-ln -s "$PWD" ~/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal
+plugin_dir="$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal"
+mkdir -p "$(dirname "$plugin_dir")"
+if [ -L "$plugin_dir" ]; then unlink "$plugin_dir"; fi
+mkdir -p "$plugin_dir"
+cp -a "$PWD"/. "$plugin_dir"/
 omarchy-shell shell rescanPlugins
 omarchy plugin enable io.github.tuthan.dropdown-terminal --section right
 ```
 
+Omarchy expects a real plugin directory, so this setup copies the repository
+into the plugin directory instead of symlinking it. After making source
+changes, rerun the `cp` command and `omarchy-shell shell rescanPlugins`.
+
 The helper requires `jq`, `hyprctl`, and the Omarchy `omarchy` command.
+
+## Update
+
+For a plugin installed from GitHub, update it with:
+
+```bash
+omarchy plugin update io.github.tuthan.dropdown-terminal --yes
+omarchy restart shell
+```
+
+For local development, recopy the repository into the real plugin directory
+and rescan it:
+
+```bash
+cp -a "$PWD"/. "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal"/
+omarchy-shell shell rescanPlugins
+```
 
 ## Hotkey
 
@@ -52,6 +77,29 @@ hl.bind("CTRL + code:41", hl.dsp.global("io.github.tuthan.dropdown-terminal:togg
 The bar icon also provides a shortcut installer: right-click it to add the
 default `Ctrl + Grave` binding. If the binding is not already present, the
 plugin backs up `bindings.lua`, appends the line, and reloads Hyprland.
+
+## Configuration
+
+The bar widget settings include `Show icon`. Turn it off to hide the icon while
+keeping the global shortcut and terminal service active.
+
+From a terminal, the same setting can be changed with:
+
+```bash
+# Hide the icon
+omarchy bar set io.github.tuthan.dropdown-terminal showIcon false --json
+
+# Show the icon again
+omarchy bar set io.github.tuthan.dropdown-terminal showIcon true --json
+```
+
+The `--json` flag is required so `false` and `true` are stored as boolean
+values rather than text. After changing this setting for the first time, restart
+the shell to apply it:
+
+```bash
+omarchy restart shell
+```
 
 ## Behavior
 

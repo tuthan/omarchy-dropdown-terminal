@@ -8,9 +8,11 @@ BarWidget {
 
   Service { id: service }
 
-  visible: !vertical
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
+  readonly property bool showIcon: setting("showIcon", true) === true
+
+  visible: !vertical && showIcon
+  implicitWidth: showIcon ? button.implicitWidth : 0
+  implicitHeight: showIcon ? button.implicitHeight : 0
 
   BarIconButton {
     id: button
