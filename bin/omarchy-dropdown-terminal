@@ -2,7 +2,8 @@
 
 set -u
 
-hidden_workspace="dropdown-terminal-hidden"
+special_workspace="dropdown-terminal"
+legacy_workspace="dropdown-terminal-hidden"
 
 die() {
   printf 'Dropdown Terminal: %s\n' "$1" >&2
@@ -10,7 +11,20 @@ die() {
 }
 
 action="${1:-toggle}"
-[[ "$action" == "toggle" || "$action" == "hide" ]] || die "unknown action: $action"
+[[ "$action" == "toggle" || "$action" == "hide" || "$action" == "cleanup" ]] || die "unknown action: $action"
+
+window_width_percent="${2:-90}"
+window_height_percent="${3:-45}"
+border_color="${4:-theme}"
+
+[[ "$window_width_percent" =~ ^[0-9]+$ ]] || window_width_percent=90
+[[ "$window_height_percent" =~ ^[0-9]+$ ]] || window_height_percent=45
+(( window_width_percent = window_width_percent < 20 ? 20 : window_width_percent > 100 ? 100 : window_width_percent ))
+(( window_height_percent = window_height_percent < 20 ? 20 : window_height_percent > 100 ? 100 : window_height_percent ))
+
+if [[ "$border_color" != "theme" && ! "$border_color" =~ ^(rgb|rgba)\([[:xdigit:]]+\)$ ]]; then
+  border_color="theme"
+fi
 
 is_private_dir() {
   local dir="$1"
@@ -46,11 +60,71 @@ state_dir() {
 }
 
 state_root="$(state_dir)" || exit $?
-state_file="$state_root/previous-workspace"
 address_file="$state_root/address"
 
 hl_dispatch() {
   hyprctl eval "hl.dispatch($1)"
+}
+
+ensure_floating() {
+  local address="$1"
+  local window_lua="$2"
+  local floating
+  local attempt
+
+  # Hyprland applies float asynchronously, and ignores it entirely for windows
+  # on hidden workspaces. Retry until the client reports floating.
+  for attempt in $(seq 1 6); do
+    hl_dispatch "hl.dsp.window.float({ action = \"set\", window = $window_lua })" >/dev/null
+    sleep 0.1
+    floating="$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$address" \
+      '.[] | select(.address == $address) | .floating' | head -n 1)"
+    [[ "$floating" == "true" ]] && return 0
+  done
+  return 1
+}
+
+set_border_color() {
+  local address="$1"
+  local window_lua color_lua
+
+  window_lua="$(lua_string "address:$address")" || return 1
+  if [[ "$border_color" == "theme" ]]; then
+    color_lua='"default"'
+  else
+    color_lua="$(lua_string "$border_color")" || return 1
+  fi
+
+  hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $window_lua, prop = \"active_border_color\", value = $color_lua }))" >/dev/null 2>&1 || true
+  hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $window_lua, prop = \"inactive_border_color\", value = $color_lua }))" >/dev/null 2>&1 || true
+}
+
+configure_window() {
+  local address="$1"
+  local monitor_width monitor_height monitor_scale logical_width logical_height
+  local window_width window_height top_margin window_x current_window
+
+  monitor_width="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .width' | head -n 1)"
+  monitor_height="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .height' | head -n 1)"
+  monitor_scale="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .scale' | head -n 1)"
+  [[ "$monitor_width" =~ ^[0-9]+$ ]] || monitor_width=1920
+  [[ "$monitor_height" =~ ^[0-9]+$ ]] || monitor_height=1080
+  [[ "$monitor_scale" =~ ^[0-9]+([.][0-9]+)?$ ]] || monitor_scale=1
+
+  logical_width="$(awk -v width="$monitor_width" -v scale="$monitor_scale" 'BEGIN { if (scale <= 0) scale = 1; printf "%d", width / scale }')"
+  logical_height="$(awk -v height="$monitor_height" -v scale="$monitor_scale" 'BEGIN { if (scale <= 0) scale = 1; printf "%d", height / scale }')"
+  window_width="$(awk -v width="$logical_width" -v percent="$window_width_percent" 'BEGIN { printf "%d", width * percent / 100 }')"
+  window_height="$(awk -v height="$logical_height" -v percent="$window_height_percent" 'BEGIN { printf "%d", height * percent / 100 }')"
+  top_margin="$(awk -v height="$logical_height" 'BEGIN { margin = height * 0.04; if (margin < 24) margin = 24; printf "%d", margin }')"
+  window_x=$(((logical_width - window_width) / 2))
+
+  current_window="$(lua_string "address:$address")" || return 1
+  # Resizing before the float transition completes is interpreted as a
+  # tiled-window resize, so wait for the client to report floating first.
+  ensure_floating "$address" "$current_window" || true
+  hl_dispatch "hl.dsp.window.resize({ x = $window_width, y = $window_height, window = $current_window })" >/dev/null
+  hl_dispatch "hl.dsp.window.move({ x = $window_x, y = $top_margin, relative = false, window = $current_window })" >/dev/null
+  set_border_color "$address"
 }
 
 client_exists() {
@@ -89,18 +163,31 @@ workspace_selector() {
   fi
 }
 
-active_workspace="$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.name // "1"')"
+special_visible() {
+  hyprctl monitors -j 2>/dev/null \
+    | jq -e --arg special "special:$special_workspace" \
+      'any(.[]; .specialWorkspace.name == $special)' >/dev/null 2>&1
+}
+
+focus_window() {
+  local window_lua="$1"
+
+  # Let a workspace toggle or transfer settle before restoring focus.
+  sleep 0.05
+  hl_dispatch "hl.dsp.focus({ window = $window_lua })" >/dev/null
+}
+
 terminal_address="$(cat "$address_file" 2>/dev/null || true)"
 
 # Recover the tracked client after shell restarts. Also migrate a client left
 # in the old visible workspace used by earlier plugin versions.
 if [[ -z "$terminal_address" ]] || ! client_exists "$terminal_address"; then
-  terminal_address="$(hyprctl clients -j 2>/dev/null | jq -r --arg hidden "$hidden_workspace" \
-    '.[] | select(.workspace.name == $hidden) | .address' | head -n 1)"
+  terminal_address="$(hyprctl clients -j 2>/dev/null | jq -r --arg special "special:$special_workspace" \
+    '.[] | select(.workspace.name == $special) | .address' | head -n 1)"
 fi
 if [[ -z "$terminal_address" ]]; then
   terminal_address="$(hyprctl clients -j 2>/dev/null | jq -r \
-    '.[] | select(.workspace.name == "dropdown-terminal") | .address' | head -n 1)"
+    '.[] | select(.workspace.name == "dropdown-terminal" or .workspace.name == "dropdown-terminal-hidden") | .address' | head -n 1)"
 fi
 
 if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && client_exists "$terminal_address"; then
@@ -108,36 +195,67 @@ if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && clie
   terminal_workspace="$(client_workspace "$terminal_address")"
   terminal_window="$(lua_string "address:$terminal_address")" || die "invalid terminal address"
 
-  if [[ "$action" == "hide" ]]; then
+  # Migrate clients created by the pre-special-workspace implementation.
+  if [[ "$terminal_workspace" == "$legacy_workspace" || "$terminal_workspace" == "$special_workspace" ]]; then
+    hl_dispatch "hl.dsp.window.move({ workspace = \"special:$special_workspace\", follow = false, window = $terminal_window })" >/dev/null
+  fi
+
+  if [[ "$action" == "hide" || "$action" == "cleanup" ]]; then
     active_address="$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // ""')"
-    if [[ "$active_address" == "$terminal_address" || "$terminal_workspace" == "$hidden_workspace" ]]; then
+    # The timer also fires after opening and focusing the dropdown. Ignore that
+    # event; this is the tracked terminal rather than a genuine focus loss.
+    [[ "$active_address" == "$terminal_address" ]] && exit 0
+
+    # Applications launched from a menu while the terminal has focus inherit
+    # its special workspace. Return that newly focused application to the
+    # normal focused workspace before hiding the dropdown behind it.
+    active_workspace="$(client_workspace "$active_address")"
+    active_window=""
+    if [[ "$active_workspace" == "special:$special_workspace" ]] && is_client_address "$active_address"; then
+      focused_workspace="$(hyprctl monitors -j 2>/dev/null | jq -r \
+        '.[] | select(.focused) | .activeWorkspace.name // "1"' | head -n 1)"
+      focused_workspace="${focused_workspace:-1}"
+      target_workspace="$(workspace_selector "$focused_workspace")"
+      target_workspace_lua="$(lua_string "$target_workspace")" || die "invalid workspace name"
+      active_window="$(lua_string "address:$active_address")" || die "invalid active window address"
+      hl_dispatch "hl.dsp.window.move({ workspace = $target_workspace_lua, follow = false, window = $active_window })" >/dev/null
+    fi
+
+    # Cleanup always preserves the normal user's focus behavior. It only acts
+    # when a foreign window inherited the dropdown's special workspace.
+    if [[ "$action" == "cleanup" && -z "$active_window" ]]; then
       exit 0
     fi
-    printf '%s\n' "$terminal_workspace" > "$state_file"
-    # Moving into the hidden workspace can otherwise trigger a compositor
-    # window animation that briefly flashes the desktop.
-    hyprctl dispatch setprop "address:$terminal_address" noanim 1 >/dev/null 2>&1 || true
-    hl_dispatch "hl.dsp.window.move({ workspace = \"name:$hidden_workspace\", follow = false, window = $terminal_window })" >/dev/null
+
+    special_visible || exit 0
+    hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+    if [[ -n "${active_window:-}" ]]; then
+      focus_window "$active_window"
+    fi
     exit $?
   fi
 
-  if [[ "$terminal_workspace" == "$hidden_workspace" ]]; then
-    # Show it on the workspace the user is currently using.
-    target_workspace="$(workspace_selector "$active_workspace")"
-    target_workspace_lua="$(lua_string "$target_workspace")" || die "invalid workspace name"
-    printf '%s\n' "$active_workspace" > "$state_file"
-    hl_dispatch "hl.dsp.window.move({ workspace = $target_workspace_lua, follow = false, window = $terminal_window })" >/dev/null
-    hl_dispatch "hl.dsp.focus({ window = $terminal_window })" >/dev/null
-  else
-    # Hide it without changing the user's current workspace.
-    printf '%s\n' "$terminal_workspace" > "$state_file"
-    hl_dispatch "hl.dsp.window.move({ workspace = \"name:$hidden_workspace\", follow = false, window = $terminal_window })" >/dev/null
+  # A second toggle hides the visible special workspace. Do not focus its
+  # client afterward: focusing a hidden special-workspace window can reveal it.
+  if special_visible; then
+    hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+    exit $?
   fi
+
+  # Size and position the window while it is isolated from the normal layout.
+  configure_window "$terminal_address"
+  hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+  focus_window "$terminal_window"
   exit $?
 fi
 
+# Focus reconciliation and auto-hide are no-ops until the terminal exists;
+# neither background action should create a terminal window.
+if [[ "$action" == "hide" || "$action" == "cleanup" ]]; then
+  exit 0
+fi
+
 before_clients="$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)"
-target_workspace="$(workspace_selector "$active_workspace")"
 
 # Launch through Omarchy so xdg-terminal-exec selects the configured emulator.
 omarchy launch terminal >/dev/null 2>&1 &
@@ -150,29 +268,16 @@ for _ in $(seq 1 40); do
   current="${current:-0x0}"
 
   if [[ "$current" != "0x0" ]] && is_client_address "$current"; then
-    monitor_width="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .width' | head -n 1)"
-    monitor_height="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .height' | head -n 1)"
-    monitor_scale="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .scale' | head -n 1)"
-    [[ "$monitor_width" =~ ^[0-9]+$ ]] || monitor_width=1920
-    [[ "$monitor_height" =~ ^[0-9]+$ ]] || monitor_height=1080
-    [[ "$monitor_scale" =~ ^[0-9]+([.][0-9]+)?$ ]] || monitor_scale=1
-
-    # Hyprland scales integer resize/move values by monitor scale, so convert
-    # the focused monitor into logical space first and size from that.
-    logical_width="$(awk -v width="$monitor_width" -v scale="$monitor_scale" 'BEGIN { if (scale <= 0) scale = 1; printf "%d", width / scale }')"
-    logical_height="$(awk -v height="$monitor_height" -v scale="$monitor_scale" 'BEGIN { if (scale <= 0) scale = 1; printf "%d", height / scale }')"
-    window_width="$(awk -v width="$logical_width" 'BEGIN { printf "%d", width * 0.90 }')"
-    window_height="$(awk -v height="$logical_height" 'BEGIN { printf "%d", height * 0.45 }')"
-    top_margin="$(awk -v height="$logical_height" 'BEGIN { margin = height * 0.04; if (margin < 24) margin = 24; printf "%d", margin }')"
-    window_x=$(((logical_width - window_width) / 2))
-
     current_window="$(lua_string "address:$current")" || die "invalid terminal address"
     printf '%s\n' "$current" > "$address_file"
-    printf '%s\n' "$active_workspace" > "$state_file"
-    hl_dispatch "hl.dsp.focus({ window = $current_window })" >/dev/null
-    hl_dispatch "hl.dsp.window.float({ action = \"set\", window = $current_window })" >/dev/null
-    hl_dispatch "hl.dsp.window.resize({ x = $window_width, y = $window_height, window = $current_window })" >/dev/null
-    hl_dispatch "hl.dsp.window.move({ x = $window_x, y = $top_margin, relative = false, window = $current_window })" >/dev/null
+    # Keep first-launch setup invisible while the initial window is moved out
+    # of the normal layout and configured at its final geometry.
+    hyprctl dispatch setprop "address:$current" alpha 0 >/dev/null 2>&1 || true
+    configure_window "$current"
+    hl_dispatch "hl.dsp.window.move({ workspace = \"special:$special_workspace\", follow = false, window = $current_window })" >/dev/null
+    hyprctl dispatch setprop "address:$current" alpha 1 >/dev/null 2>&1 || true
+    hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+    focus_window "$current_window"
     exit $?
   fi
   sleep 0.1

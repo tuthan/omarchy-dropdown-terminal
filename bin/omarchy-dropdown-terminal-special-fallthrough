@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+
+set -eu
+
+action="${1:-}"
+[[ "$action" == "enable" || "$action" == "disable" ]] || exit 2
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
+config_file="$config_dir/input.lua"
+begin_marker="-- BEGIN Dropdown Terminal special fallthrough"
+end_marker="-- END Dropdown Terminal special fallthrough"
+
+if [[ "$action" == "disable" ]] && { [[ ! -f "$config_file" ]] || ! grep -Fxq -- "$begin_marker" "$config_file"; }; then
+  exit 0
+fi
+
+mkdir -p "$config_dir"
+mode="644"
+[[ -f "$config_file" ]] && mode="$(stat -c '%a' "$config_file")"
+temp_file="$(mktemp "$config_dir/.input.lua.dropdown-terminal.XXXXXX")"
+
+cleanup() {
+  rm -f "$temp_file"
+}
+trap cleanup EXIT
+
+if [[ -f "$config_file" ]]; then
+  awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { skipping = 1; next }
+    $0 == end { skipping = 0; next }
+    !skipping { print }
+  ' "$config_file" > "$temp_file"
+fi
+
+if [[ "$action" == "enable" ]]; then
+  printf '\n%s\nhl.config({\n  input = {\n    special_fallthrough = true,\n  },\n})\n%s\n' \
+    "$begin_marker" "$end_marker" >> "$temp_file"
+fi
+
+chmod "$mode" "$temp_file"
+mv "$temp_file" "$config_file"
+trap - EXIT
+
+# A missing compositor socket must not leave the settings panel's process
+# running indefinitely. The next Hyprland reload will still pick up the file.
+timeout 2s hyprctl reload >/dev/null 2>&1 || true
+timeout 2s hyprctl configerrors >/dev/null 2>&1 || true

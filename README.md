@@ -76,12 +76,16 @@ symbol, for example:
 hl.bind("CTRL + code:41", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))
 ```
 
-The bar icon also provides shortcuts: right-click it to add the default
-`Ctrl + Grave` binding, or middle-click it to toggle auto-hide when the terminal
-loses focus. If the binding is not already present, the plugin backs up
+The bar icon also provides shortcuts: left-click it to toggle the terminal,
+middle-click it to open the settings panel, or right-click it to add the default
+`Ctrl + Grave` binding. If the binding is not already present, the plugin backs up
 `bindings.lua`, appends the line, and reloads Hyprland.
 
 ## Configuration
+
+Middle-click the bar icon to open the settings panel:
+
+![Dropdown Terminal settings panel](settings-panel.png)
 
 The bar widget settings include `Show icon`. Turn it off to hide the icon while
 keeping the global shortcut and terminal service active.
@@ -121,17 +125,49 @@ settings or with:
 omarchy bar set io.github.tuthan.dropdown-terminal autoHideDelayMs 500 --json
 ```
 
-Hiding moves the terminal to the hidden workspace, so it uses Hyprland’s
-configured window-out animation.
+### Focus through the dropdown
+
+The settings panel also offers **Focus through**. When enabled, it adds this
+plugin-managed override to `~/.config/hypr/input.lua` and reloads Hyprland:
+
+```lua
+hl.config({
+  input = {
+    special_fallthrough = true,
+  },
+})
+```
+
+This lets normal windows receive pointer focus while the floating special
+workspace is visible, making auto-hide work naturally with focus-follows-mouse.
+The option affects all floating special workspaces and removes only its own
+marked override when disabled.
+
+The terminal size and border can also be adjusted from the widget settings:
+
+```bash
+omarchy bar set io.github.tuthan.dropdown-terminal widthPercent 90 --json
+omarchy bar set io.github.tuthan.dropdown-terminal heightPercent 45 --json
+omarchy bar set io.github.tuthan.dropdown-terminal borderColor 'rgb(ff8800)' --json
+```
+
+The default border color is `theme`, which leaves the border under Omarchy and
+Hyprland theme control. Use a Hyprland `rgb(...)` or `rgba(...)` value for a
+custom border. Size and custom border settings are reapplied the next time the
+terminal is toggled.
+
+Hiding toggles the terminal's named Hyprland special workspace, so Omarchy's
+configured special-workspace animation is used.
 
 ## Behavior
 
 - First activation runs `omarchy launch terminal`, preserving the configured
   default terminal and current working directory behavior.
-- The new window stays on the current workspace, floats at 90% × 45%, and is
+- The new window stays on the current workspace, floats at the configured size
+  (90% × 45% by default), and is
   centered near the top edge so the current desktop remains visible behind it.
-- Later activations move the same terminal to/from a hidden workspace named
-  `dropdown-terminal-hidden`, without changing the user's current workspace.
+- Later activations toggle the same terminal in the named special workspace
+  `special:dropdown-terminal`, without changing the user's current workspace.
 - Existing dropdown windows are detected after a shell restart, so they are
   reused instead of duplicated.
 - Runtime state is stored in `XDG_RUNTIME_DIR` when it is private; if that is

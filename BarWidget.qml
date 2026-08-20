@@ -12,11 +12,55 @@ BarWidget {
   }
 
   readonly property bool showIcon: setting("showIcon", true) === true
-  readonly property bool autoHideOnFocusLoss: service.autoHideOnFocusLoss
 
   visible: !vertical && showIcon
   implicitWidth: showIcon ? button.implicitWidth : 0
   implicitHeight: showIcon ? button.implicitHeight : 0
+
+  function injectSettingsPanel() {
+    if (!settingsLoader.item) return
+    settingsLoader.item.bar = root.bar
+    settingsLoader.item.anchorItem = button
+    settingsLoader.item.hostWidget = root
+    settingsLoader.item.settings = root.settings
+  }
+
+  // KeyboardPanel dismissal resolves close() on the host widget; without these
+  // it writes to a bound property directly and the panel can never reopen.
+  function open() {
+    if (settingsLoader.item && typeof settingsLoader.item.open === "function")
+      settingsLoader.item.open()
+  }
+
+  function close() {
+    if (settingsLoader.item && typeof settingsLoader.item.close === "function")
+      settingsLoader.item.close()
+  }
+
+  function closeForPopoutSwitch() {
+    if (settingsLoader.item && typeof settingsLoader.item.closeForPopoutSwitch === "function")
+      settingsLoader.item.closeForPopoutSwitch()
+  }
+
+  function toggleSettings() {
+    if (settingsLoader.item && typeof settingsLoader.item.toggle === "function")
+      settingsLoader.item.toggle()
+  }
+
+  function setSpecialFallthrough(enabled) {
+    service.applySpecialFallthrough(enabled)
+  }
+
+  Loader {
+    id: settingsLoader
+    active: true
+    source: Qt.resolvedUrl("Panel.qml")
+    visible: false
+    onLoaded: {
+      root.injectSettingsPanel()
+      Qt.callLater(root.injectSettingsPanel)
+    }
+  }
 
   BarIconButton {
     id: button
@@ -26,22 +70,14 @@ BarWidget {
     slotSize: Style.bar.statusSlot
     tooltipText: service.busy
       ? "Opening terminal…"
-      : "Left-click: terminal · Middle-click: auto-hide "
-        + (root.autoHideOnFocusLoss ? "on" : "off")
-        + " · Right-click: bind Ctrl + Grave"
+      : "Left-click: terminal · Middle-click: settings · Right-click: bind Ctrl + Grave"
     onPressed: function(button) {
       if (button === Qt.RightButton) service.installHotkey()
-      else if (button === Qt.MiddleButton) root.toggleAutoHideOnFocusLoss()
+      else if (button === Qt.MiddleButton) root.toggleSettings()
       else if (button === Qt.LeftButton) service.toggle()
     }
   }
 
-  function toggleAutoHideOnFocusLoss() {
-    var entry = { id: moduleName }
-    for (var key in settings) if (key !== "id") entry[key] = settings[key]
-    entry.autoHideOnFocusLoss = !autoHideOnFocusLoss
-    settings = entry
-    if (bar && bar.shell && typeof bar.shell.updateEntryInline === "function")
-      bar.shell.updateEntryInline(moduleName, entry)
-  }
+  onBarChanged: injectSettingsPanel()
+  onSettingsChanged: injectSettingsPanel()
 }
