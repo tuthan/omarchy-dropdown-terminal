@@ -118,6 +118,53 @@ Panel {
 
       PanelSeparator { width: parent.width }
 
+      Text {
+        text: "Bar icon"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        text: "Paste a Nerd Font glyph or short label"
+        color: Util.alpha(root.contentForeground, 0.5)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        TextField {
+          id: iconField
+          width: parent.width - applyIcon.width - iconPreview.width - parent.spacing * 2
+          text: String(root.setting("icon", "\uF120"))
+          foreground: root.contentForeground
+          font.family: root.contentFontFamily
+          onAccepted: root.persistSettings({ icon: text || "\uF120" })
+        }
+        Button {
+          id: applyIcon
+          text: "Apply"
+          tooltipText: "Apply this glyph to the bar button."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.persistSettings({ icon: iconField.text || "\uF120" })
+        }
+        Text {
+          id: iconPreview
+          width: Style.space(28)
+          text: iconField.text || "\uF120"
+          color: root.contentForeground
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.title
+          horizontalAlignment: Text.AlignHCenter
+          verticalAlignment: Text.AlignVCenter
+        }
+      }
+
       Row {
         width: parent.width
         spacing: Style.space(8)

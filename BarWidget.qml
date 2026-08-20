@@ -12,6 +12,7 @@ BarWidget {
   }
 
   readonly property bool showIcon: setting("showIcon", true) === true
+  readonly property string icon: String(setting("icon", "\uF120"))
 
   visible: !vertical && showIcon
   implicitWidth: showIcon ? button.implicitWidth : 0
@@ -66,7 +67,7 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "\uF120"
+    text: root.icon
     slotSize: Style.bar.statusSlot
     tooltipText: service.busy
       ? "Opening terminal…"

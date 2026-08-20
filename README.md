@@ -90,6 +90,9 @@ Middle-click the bar icon to open the settings panel:
 The bar widget settings include `Show icon`. Turn it off to hide the icon while
 keeping the global shortcut and terminal service active.
 
+The **Bar icon** setting accepts a Nerd Font glyph or short text and shows a
+live preview in the settings panel. The default is the terminal glyph `\uF120`.
+
 From a terminal, the same setting can be changed with:
 
 ```bash
