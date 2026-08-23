@@ -154,13 +154,37 @@ omarchy bar set io.github.tuthan.dropdown-terminal heightPercent 45 --json
 omarchy bar set io.github.tuthan.dropdown-terminal borderColor 'rgb(ff8800)' --json
 ```
 
+### Slide direction
+
+Hyprland's `slidevert` special-workspace animation always reveals upward, and
+its animation styles take no direction argument, so a special workspace cannot
+be told to drop downward. **Slide down from top** (on by default) works around
+this: the terminal is parked above the top edge as the workspace is revealed and
+then animated down into place, so it drops in like a Quake console.
+
+```bash
+# Use Hyprland's native (upward) special-workspace animation instead
+omarchy bar set io.github.tuthan.dropdown-terminal slideFromTop false --json
+```
+
+While a summon is in flight the plugin switches the global `specialWorkspace`,
+`specialWorkspaceIn`, and `specialWorkspaceOut` animations off and restores them
+immediately afterwards, including if it is interrupted. Every leaf carries its
+own enabled flag, so all three have to be switched off for the reveal to be
+suppressed. This is a runtime override only: nothing is written to your Hyprland
+config, and any `hyprctl reload` clears it. The suppression lasts a few hundred
+milliseconds and is shared with other special workspaces such as Omarchy's
+`SUPER + S` scratchpad, which is unanimated for that brief window.
+
 The default border color is `theme`, which leaves the border under Omarchy and
 Hyprland theme control. Use a Hyprland `rgb(...)` or `rgba(...)` value for a
 custom border. Size and custom border settings are reapplied the next time the
 terminal is toggled.
 
-Hiding toggles the terminal's named Hyprland special workspace, so Omarchy's
-configured special-workspace animation is used.
+Hiding slides the terminal up past the top edge and then toggles its named
+Hyprland special workspace away. With **Slide down from top** turned off, the
+workspace is toggled directly and Omarchy's configured special-workspace
+animation is used instead.
 
 ## Behavior
 
@@ -171,6 +195,10 @@ configured special-workspace animation is used.
   centered near the top edge so the current desktop remains visible behind it.
 - Later activations toggle the same terminal in the named special workspace
   `special:dropdown-terminal`, without changing the user's current workspace.
+- Summoning parks the window above the top edge in the same synchronous
+  compositor call as the reveal. Hyprland re-centers a floating window whenever
+  its special workspace is revealed, and rejects any position whose center falls
+  outside the monitor, so the park cannot be done ahead of time.
 - Existing dropdown windows are detected after a shell restart, so they are
   reused instead of duplicated.
 - Runtime state is stored in `XDG_RUNTIME_DIR` when it is private; if that is

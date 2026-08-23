@@ -58,6 +58,7 @@ Panel {
       root.hostWidget.setSpecialFallthrough(value)
   }
   function setDelay(value) { persistSettings({ autoHideDelayMs: Math.round(value) }) }
+  function setSlideFromTop(value) { persistSettings({ slideFromTop: value }) }
 
   function colorToHypr(color) {
     function channel(value) {
@@ -273,6 +274,20 @@ Panel {
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
           onClicked: root.setSpecialFallthrough(!(root.setting("allowSpecialFallthrough", false) === true))
+        }
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        Button {
+          text: root.setting("slideFromTop", true) !== false ? "Slide: from top" : "Slide: native"
+          tooltipText: "Drop the terminal in from the top edge instead of Hyprland's upward special-workspace slide."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setSlideFromTop(!(root.setting("slideFromTop", true) !== false))
         }
       }
 

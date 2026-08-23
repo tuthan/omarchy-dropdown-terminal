@@ -16,6 +16,7 @@ action="${1:-toggle}"
 window_width_percent="${2:-90}"
 window_height_percent="${3:-45}"
 border_color="${4:-theme}"
+slide_from_top="${5:-1}"
 
 [[ "$window_width_percent" =~ ^[0-9]+$ ]] || window_width_percent=90
 [[ "$window_height_percent" =~ ^[0-9]+$ ]] || window_height_percent=45
@@ -25,6 +26,15 @@ border_color="${4:-theme}"
 if [[ "$border_color" != "theme" && ! "$border_color" =~ ^(rgb|rgba)\([[:xdigit:]]+\)$ ]]; then
   border_color="theme"
 fi
+
+[[ "$slide_from_top" == "0" || "$slide_from_top" == "1" ]] || slide_from_top=1
+
+# Geometry computed by compute_geometry / live_geometry.
+window_width=0
+window_height=0
+window_x=0
+top_margin=0
+parked_y=0
 
 is_private_dir() {
   local dir="$1"
@@ -61,6 +71,7 @@ state_dir() {
 
 state_root="$(state_dir)" || exit $?
 address_file="$state_root/address"
+animation_file="$state_root/special-animation"
 
 hl_dispatch() {
   hyprctl eval "hl.dispatch($1)"
@@ -99,10 +110,106 @@ set_border_color() {
   hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $window_lua, prop = \"inactive_border_color\", value = $color_lua }))" >/dev/null 2>&1 || true
 }
 
-configure_window() {
-  local address="$1"
+# Hyprland has no per-workspace animation control and no way to reverse the
+# direction of a "slidevert" special workspace, so the reveal is made instant
+# and the visible motion is driven by an animated window move instead.
+#
+# The value is saved and restored because these leaves are global and shared
+# with every other special workspace, such as Omarchy's SUPER+S scratchpad.
+saved_special_animation=""
+
+# Read the effective specialWorkspace settings. specialWorkspaceIn normally
+# inherits from this parent, so these are the values to restore it to.
+read_special_animation() {
+  hyprctl -j animations 2>/dev/null | jq -r '
+    (.[0] // [])[]
+    | select(.name == "specialWorkspace" and .speed > 0 and .style != "")
+    | "\(.enabled)\t\(.speed)\t\(.bezier)\t\(.style)"' 2>/dev/null | head -n 1
+}
+
+restore_special_animation() {
+  local enabled speed bezier style lua leaf
+
+  [[ -n "$saved_special_animation" ]] || return 0
+  IFS=$'\t' read -r enabled speed bezier style <<<"$saved_special_animation"
+  saved_special_animation=""
+
+  [[ "$enabled" == "true" || "$enabled" == "false" ]] || return 0
+  [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]] || return 0
+  lua="enabled = $enabled, speed = $speed"
+  [[ -n "$bezier" ]] && lua="$lua, bezier = $(lua_string "$bezier")"
+  [[ -n "$style" ]] && lua="$lua, style = $(lua_string "$style")"
+
+  # Every leaf carries its own enabled flag, so all three must be put back.
+  for leaf in specialWorkspace specialWorkspaceIn specialWorkspaceOut; do
+    hyprctl eval "hl.animation({ leaf = \"$leaf\", $lua })" >/dev/null 2>&1 || true
+  done
+  rm -f "$animation_file" 2>/dev/null || true
+}
+
+# A run killed with SIGKILL cannot restore the animations itself. Any marker
+# still on disk after a few seconds belongs to such a run, never to a live one.
+repair_special_animation() {
+  local modified now
+
+  [[ -s "$animation_file" ]] || return 0
+  modified="$(stat -c '%Y' "$animation_file" 2>/dev/null)" || return 0
+  now="$(date +%s)"
+  [[ "$modified" =~ ^[0-9]+$ && "$now" =~ ^[0-9]+$ ]] || return 0
+  (( now - modified < 5 )) && return 0
+
+  saved_special_animation="$(cat "$animation_file" 2>/dev/null || true)"
+  restore_special_animation
+}
+
+suppress_special_animation() {
+  [[ -n "$saved_special_animation" ]] && return 0
+  # Without a readable parent there is nothing safe to restore afterwards, so
+  # leave the compositor alone and accept its native reveal.
+  saved_special_animation="$(read_special_animation)"
+  [[ -n "$saved_special_animation" ]] || return 0
+
+  # Restore even if this script is interrupted mid-toggle; leaving the reveal
+  # disabled would silently break every other special workspace. SIGKILL cannot
+  # be trapped, so the values are also parked on disk for the next run.
+  printf '%s\n' "$saved_special_animation" > "$animation_file" 2>/dev/null || true
+  trap restore_special_animation EXIT INT TERM HUP
+  # Disabling only the parent leaves the In/Out children reporting enabled, and
+  # vice versa; the reveal keeps sliding unless all three are switched off.
+  for leaf in specialWorkspace specialWorkspaceIn specialWorkspaceOut; do
+    hyprctl eval "hl.animation({ leaf = \"$leaf\", enabled = false })" >/dev/null 2>&1 || true
+  done
+}
+
+animation_speed() {
+  hyprctl -j animations 2>/dev/null | jq -r --arg name "$1" '
+    (.[0] // [])[]
+    | select(.name == $name and .overridden == true and .speed > 0)
+    | .speed' 2>/dev/null | head -n 1
+}
+
+# Hyprland animation speeds are in deciseconds. The workspace may only be
+# toggled away once the window has finished sliding off the top edge.
+move_animation_seconds() {
+  local speed leaf
+
+  for leaf in windowsMove windows global; do
+    speed="$(animation_speed "$leaf")"
+    [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]] && break
+    speed=""
+  done
+  [[ -n "$speed" ]] || speed=4
+
+  awk -v s="$speed" 'BEGIN {
+    v = s / 10 + 0.08
+    if (v < 0.12) v = 0.12
+    if (v > 1.0) v = 1.0
+    printf "%.2f", v
+  }'
+}
+
+compute_geometry() {
   local monitor_width monitor_height monitor_scale logical_width logical_height
-  local window_width window_height top_margin window_x current_window
 
   monitor_width="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .width' | head -n 1)"
   monitor_height="$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .height' | head -n 1)"
@@ -117,14 +224,135 @@ configure_window() {
   window_height="$(awk -v height="$logical_height" -v percent="$window_height_percent" 'BEGIN { printf "%d", height * percent / 100 }')"
   top_margin="$(awk -v height="$logical_height" 'BEGIN { margin = height * 0.04; if (margin < 24) margin = 24; printf "%d", margin }')"
   window_x=$(((logical_width - window_width) / 2))
+  parked_y=$(( -(window_height + 60) ))
+}
 
-  current_window="$(lua_string "address:$address")" || return 1
+# Hiding must clear the real window, which the user may have resized by hand,
+# so prefer the live geometry over the configured percentages.
+live_geometry() {
+  local address="$1"
+  local live_x live_height
+
+  compute_geometry
+  live_x="$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$address" \
+    '.[] | select(.address == $address) | .at[0]' | head -n 1)"
+  live_height="$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$address" \
+    '.[] | select(.address == $address) | .size[1]' | head -n 1)"
+  [[ "$live_x" =~ ^-?[0-9]+$ ]] && window_x="$live_x"
+  [[ "$live_height" =~ ^[0-9]+$ ]] && parked_y=$(( -(live_height + 60) ))
+}
+
+size_window() {
+  local address="$1"
+  local window_lua state floating width height
+
+  window_lua="$(lua_string "address:$address")" || return 1
+
+  # Re-floating and re-resizing an already correct window costs a round trip
+  # plus a settling sleep on every summon, which is visible as lag.
+  state="$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$address" \
+    '.[] | select(.address == $address) | "\(.floating)\t\(.size[0])\t\(.size[1])"' | head -n 1)"
+  IFS=$'\t' read -r floating width height <<<"$state"
+  if [[ "$floating" == "true" && "$width" == "$window_width" && "$height" == "$window_height" ]]; then
+    set_border_color "$address"
+    return 0
+  fi
+
   # Resizing before the float transition completes is interpreted as a
   # tiled-window resize, so wait for the client to report floating first.
-  ensure_floating "$address" "$current_window" || true
-  hl_dispatch "hl.dsp.window.resize({ x = $window_width, y = $window_height, window = $current_window })" >/dev/null
-  hl_dispatch "hl.dsp.window.move({ x = $window_x, y = $top_margin, relative = false, window = $current_window })" >/dev/null
+  ensure_floating "$address" "$window_lua" || true
+  hl_dispatch "hl.dsp.window.resize({ x = $window_width, y = $window_height, window = $window_lua })" >/dev/null
   set_border_color "$address"
+}
+
+move_window() {
+  local window_lua="$1"
+  local y="$2"
+  hl_dispatch "hl.dsp.window.move({ x = $window_x, y = $y, relative = false, window = $window_lua })" >/dev/null
+}
+
+configure_window() {
+  local address="$1"
+  local window_lua
+
+  window_lua="$(lua_string "address:$address")" || return 1
+  compute_geometry
+  size_window "$address"
+  move_window "$window_lua" "$top_margin"
+}
+
+# Hyprland re-centres a floating window whenever its special workspace is
+# revealed, and refuses to keep a window whose centre falls outside the
+# monitor. Both are defeated by parking the window in the same synchronous Lua
+# block as the reveal, with the window masked so the centred frame is never
+# shown.
+reveal_parked() {
+  local window_lua="$1"
+
+  hyprctl eval "
+hl.dispatch(hl.dsp.window.set_prop({ window = $window_lua, prop = \"no_anim\", value = 1 }))
+hl.dispatch(hl.dsp.window.set_prop({ window = $window_lua, prop = \"opacity\", value = 0 }))
+hl.dispatch(hl.dsp.workspace.toggle_special(\"$special_workspace\"))
+hl.dispatch(hl.dsp.window.move({ x = $window_x, y = $parked_y, relative = false, window = $window_lua }))
+hl.dispatch(hl.dsp.window.set_prop({ window = $window_lua, prop = \"opacity\", value = 1 }))
+hl.dispatch(hl.dsp.window.set_prop({ window = $window_lua, prop = \"no_anim\", value = 0 }))
+" >/dev/null 2>&1
+}
+
+show_window() {
+  local address="$1"
+  local window_lua
+
+  window_lua="$(lua_string "address:$address")" || return 1
+
+  if [[ "$slide_from_top" != "1" ]]; then
+    configure_window "$address"
+    hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+    focus_window "$window_lua"
+    return 0
+  fi
+
+  compute_geometry
+  size_window "$address"
+  suppress_special_animation
+  reveal_parked "$window_lua"
+  move_window "$window_lua" "$top_margin"
+  focus_window "$window_lua"
+  # Hyprland re-reads the animation config on every tick, so the reveal must be
+  # left suppressed until the drop has finished. Restoring immediately lets the
+  # workspace resume sliding up underneath the descending window.
+  sleep "$(move_animation_seconds)"
+  restore_special_animation
+}
+
+hide_window() {
+  local address="$1"
+  local window_lua
+
+  window_lua="$(lua_string "address:$address")" || return 1
+
+  if [[ "$slide_from_top" != "1" ]]; then
+    hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+    return 0
+  fi
+
+  live_geometry "$address"
+  move_window "$window_lua" "$parked_y"
+  sleep "$(move_animation_seconds)"
+  hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+}
+
+# True when the window is on screen rather than parked above the top edge. A
+# script killed mid-toggle can leave the workspace visible but the window
+# parked; treating that as "hidden" keeps a single keypress recovering it.
+window_on_screen() {
+  local address="$1"
+  local y
+
+  y="$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$address" \
+    '.[] | select(.address == $address) | .at[1]' | head -n 1)"
+  [[ "$y" =~ ^-?[0-9]+$ ]] || return 0
+  (( y >= 0 ))
 }
 
 client_exists() {
@@ -177,6 +405,8 @@ focus_window() {
   hl_dispatch "hl.dsp.focus({ window = $window_lua })" >/dev/null
 }
 
+repair_special_animation
+
 terminal_address="$(cat "$address_file" 2>/dev/null || true)"
 
 # Recover the tracked client after shell restarts. Also migrate a client left
@@ -228,7 +458,7 @@ if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && clie
     fi
 
     special_visible || exit 0
-    hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+    hide_window "$terminal_address"
     if [[ -n "${active_window:-}" ]]; then
       focus_window "$active_window"
     fi
@@ -237,15 +467,20 @@ if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && clie
 
   # A second toggle hides the visible special workspace. Do not focus its
   # client afterward: focusing a hidden special-workspace window can reveal it.
-  if special_visible; then
-    hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+  if special_visible && window_on_screen "$terminal_address"; then
+    hide_window "$terminal_address"
     exit $?
   fi
 
-  # Size and position the window while it is isolated from the normal layout.
-  configure_window "$terminal_address"
-  hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
-  focus_window "$terminal_window"
+  # Recover a workspace left visible with the window still parked off screen.
+  if special_visible; then
+    compute_geometry
+    move_window "$terminal_window" "$top_margin"
+    focus_window "$terminal_window"
+    exit $?
+  fi
+
+  show_window "$terminal_address"
   exit $?
 fi
 
@@ -272,12 +507,13 @@ for _ in $(seq 1 40); do
     printf '%s\n' "$current" > "$address_file"
     # Keep first-launch setup invisible while the initial window is moved out
     # of the normal layout and configured at its final geometry.
-    hyprctl dispatch setprop "address:$current" alpha 0 >/dev/null 2>&1 || true
-    configure_window "$current"
+    hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $current_window, prop = \"opacity\", value = 0 }))" >/dev/null 2>&1 || true
+    compute_geometry
+    size_window "$current"
+    move_window "$current_window" "$top_margin"
     hl_dispatch "hl.dsp.window.move({ workspace = \"special:$special_workspace\", follow = false, window = $current_window })" >/dev/null
-    hyprctl dispatch setprop "address:$current" alpha 1 >/dev/null 2>&1 || true
-    hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
-    focus_window "$current_window"
+    hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $current_window, prop = \"opacity\", value = 1 }))" >/dev/null 2>&1 || true
+    show_window "$current"
     exit $?
   fi
   sleep 0.1
