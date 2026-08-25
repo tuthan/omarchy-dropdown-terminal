@@ -69,7 +69,7 @@ BarWidget {
     bar: root.bar
     text: root.icon
     slotSize: Style.bar.statusSlot
-    tooltipText: service.busy
+    tooltipText: service.launching
       ? "Opening terminal…"
       : "Left-click: terminal · Middle-click: settings · Right-click: bind Ctrl + Grave"
     onPressed: function(button) {

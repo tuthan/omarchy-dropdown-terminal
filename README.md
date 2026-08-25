@@ -167,14 +167,20 @@ then animated down into place, so it drops in like a Quake console.
 omarchy bar set io.github.tuthan.dropdown-terminal slideFromTop false --json
 ```
 
-While a summon is in flight the plugin switches the global `specialWorkspace`,
-`specialWorkspaceIn`, and `specialWorkspaceOut` animations off and restores them
-immediately afterwards, including if it is interrupted. Every leaf carries its
-own enabled flag, so all three have to be switched off for the reveal to be
-suppressed. This is a runtime override only: nothing is written to your Hyprland
-config, and any `hyprctl reload` clears it. The suppression lasts a few hundred
-milliseconds and is shared with other special workspaces such as Omarchy's
-`SUPER + S` scratchpad, which is unanimated for that brief window.
+While a summon is in flight the plugin temporarily overrides the global
+`specialWorkspace` animation node to an imperceptible speed and restores it
+immediately afterwards, including if it is interrupted. The child
+`specialWorkspaceIn` / `specialWorkspaceOut` nodes are never touched: they
+resolve their duration through the parent, so suppressing the reveal does not
+turn them into explicit overrides. Suppression requires the `specialWorkspace`
+node to be explicitly configured (every Omarchy install sets it in
+`looknfeel.lua`); if it only inherits defaults, the native reveal is used
+instead, because the runtime API cannot restore inheritance once a node has
+been written. This is a runtime override only: nothing is written to your
+Hyprland config, and any `hyprctl reload` clears it. The suppression lasts a
+few hundred milliseconds and is shared with other special workspaces such as
+Omarchy's `SUPER + S` scratchpad, which is near-instant for that brief window.
+Concurrent invocations of the helper are serialized with a lockfile.
 
 The default border color is `theme`, which leaves the border under Omarchy and
 Hyprland theme control. Use a Hyprland `rgb(...)` or `rgba(...)` value for a
@@ -195,10 +201,16 @@ animation is used instead.
   centered near the top edge so the current desktop remains visible behind it.
 - Later activations toggle the same terminal in the named special workspace
   `special:dropdown-terminal`, without changing the user's current workspace.
-- Summoning parks the window above the top edge in the same synchronous
-  compositor call as the reveal. Hyprland re-centers a floating window whenever
-  its special workspace is revealed, and rejects any position whose center falls
-  outside the monitor, so the park cannot be done ahead of time.
+- With multiple monitors, summoning while the terminal is visible on another
+  screen moves it to the focused screen instead, resized and positioned for
+  that screen's dimensions and scale.
+- Summoning parks the window above the focused monitor's top edge in the same
+  synchronous compositor call as the reveal. Hyprland re-centers a floating
+  window whenever its special workspace is revealed, and rejects any position
+  whose center falls outside the monitor, so the park cannot be done ahead of
+  time. All geometry is anchored to the focused monitor's global origin, and
+  the on-screen check tests overlap against every connected monitor, so
+  vertically stacked monitor arrangements are classified correctly.
 - Existing dropdown windows are detected after a shell restart, so they are
   reused instead of duplicated.
 - Runtime state is stored in `XDG_RUNTIME_DIR` when it is private; if that is

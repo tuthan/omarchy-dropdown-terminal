@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.tuthan.dropdown-terminal",
   "name": "Dropdown Terminal",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "author": "Hung Vo",
   "license": "MIT",
   "description": "Summon the configured default terminal in a floating special workspace",
@@ -51,7 +51,7 @@
         "key": "slideFromTop",
         "type": "boolean",
         "label": "Slide down from top",
-        "description": "Drop the terminal in from the top edge instead of Hyprland's upward special-workspace slide. Briefly overrides the global specialWorkspace animation at runtime and restores it afterwards.",
+        "description": "Drop the terminal in from the top edge instead of Hyprland's upward special-workspace slide. Briefly speeds up the global specialWorkspace animation node at runtime and restores it afterwards; the In/Out child nodes are never modified.",
         "defaultValue": true
       },
       {

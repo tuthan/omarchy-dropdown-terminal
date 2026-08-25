@@ -19,7 +19,15 @@ Item {
   readonly property string helperPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal").toString().replace(/^file:\/\//, "")
   readonly property string bindPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal-bind").toString().replace(/^file:\/\//, "")
   readonly property string fallthroughPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal-special-fallthrough").toString().replace(/^file:\/\//, "")
-  readonly property bool busy: toggleProcess.running
+  // Every helper action mutates the same window, workspace, and compositor
+  // animation state, so they must never overlap; the helper's own flock is a
+  // second line of defense for direct invocations.
+  readonly property bool busy: toggleProcess.running || hideProcess.running || reconcileProcess.running
+  // User-facing subset: only actions that actually summon the terminal.
+  readonly property bool launching: toggleProcess.running || hideProcess.running
+  // Timestamp of the last toggle start; focus events within this window belong
+  // to the summon itself and must not arm the auto-hide timer.
+  property double lastToggleStart: 0
   property bool settingsReady: false
   property bool desiredSpecialFallthrough: false
 
@@ -45,8 +53,14 @@ Item {
     target: Hyprland
     function onActiveToplevelChanged() {
       root.reconcileSpecialWorkspace()
-      if (root.autoHideOnFocusLoss) hideTimer.restart()
-      else hideTimer.stop()
+      if (!root.autoHideOnFocusLoss) return
+      // On a dual-monitor setup the summon itself can bounce focus; ignore
+      // those events instead of instantly hiding the freshly shown terminal.
+      if (Date.now() - root.lastToggleStart < 1200) {
+        hideTimer.stop()
+        return
+      }
+      hideTimer.restart()
     }
   }
 
@@ -102,15 +116,20 @@ Item {
   }
 
   function toggle() {
-    if (!toggleProcess.running && !hideProcess.running) toggleProcess.running = true
+    var now = Date.now()
+    // Debounce: duplicate keybindings or key repeat must not queue a second
+    // toggle behind the first, which would show and then instantly hide.
+    if (root.busy || now - root.lastToggleStart < 150) return
+    root.lastToggleStart = now
+    toggleProcess.running = true
   }
 
   function hide() {
-    if (!toggleProcess.running && !hideProcess.running) hideProcess.running = true
+    if (!root.busy) hideProcess.running = true
   }
 
   function reconcileSpecialWorkspace() {
-    if (!reconcileProcess.running) reconcileProcess.running = true
+    if (!root.busy) reconcileProcess.running = true
   }
 
   function applySpecialFallthrough(enabled) {

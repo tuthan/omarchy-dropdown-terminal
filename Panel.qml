@@ -16,6 +16,7 @@ Panel {
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string borderSetting: String(root.setting("borderColor", "theme"))
+  readonly property bool slideFromTop: root.setting("slideFromTop", true) !== false
   readonly property color pickerColor: {
     var match = root.borderSetting.match(/^rgb\(([0-9a-fA-F]{6})\)$/)
     return match ? Qt.color("#" + match[1]) : Color.accent
@@ -216,13 +217,6 @@ Panel {
         font.pixelSize: Style.font.caption
       }
 
-      Text {
-        text: "theme or rgb(...) / rgba(...)"
-        color: Util.alpha(root.contentForeground, 0.5)
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.font.caption
-      }
-
       Row {
         width: parent.width
         spacing: Style.space(8)
@@ -238,6 +232,7 @@ Panel {
         }
         Button {
           text: "Custom"
+          selected: root.borderSetting !== "theme"
           tooltipText: "Choose a custom border color."
           focusable: true
           bordered: true
@@ -280,15 +275,15 @@ Panel {
       Row {
         width: parent.width
         spacing: Style.space(8)
-        Button {
-          text: root.setting("slideFromTop", true) !== false ? "Slide: from top" : "Slide: native"
-          tooltipText: "Drop the terminal in from the top edge instead of Hyprland's upward special-workspace slide."
-          focusable: true
-          bordered: true
-          foreground: root.contentForeground
-          fontFamily: root.contentFontFamily
-          onClicked: root.setSlideFromTop(!(root.setting("slideFromTop", true) !== false))
-        }
+            Button {
+              text: root.slideFromTop ? "Slide: from top" : "Slide: native"
+              tooltipText: "Drop the terminal in from the top edge instead of Hyprland's upward special-workspace slide."
+              focusable: true
+              bordered: true
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: root.setSlideFromTop(!root.slideFromTop)
+            }
       }
 
       Row {
