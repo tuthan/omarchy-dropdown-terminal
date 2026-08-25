@@ -14,6 +14,7 @@ Item {
   readonly property int widthPercent: Math.max(20, Math.min(100, Number(setting("widthPercent", 90))))
   readonly property int heightPercent: Math.max(20, Math.min(100, Number(setting("heightPercent", 45))))
   readonly property string borderColor: String(setting("borderColor", "theme"))
+  readonly property bool slideFromTop: setting("slideFromTop", true) !== false
 
   readonly property string helperPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal").toString().replace(/^file:\/\//, "")
   readonly property string bindPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal-bind").toString().replace(/^file:\/\//, "")
@@ -56,22 +57,28 @@ Item {
     onTriggered: if (root.autoHideOnFocusLoss) root.hide()
   }
 
+  // Every action needs the geometry: hiding slides the window off the top edge
+  // before the workspace is toggled away.
+  function helperArgs(action) {
+    return ["bash", root.helperPath, action, String(root.widthPercent),
+      String(root.heightPercent), root.borderColor, root.slideFromTop ? "1" : "0"]
+  }
+
   Process {
     id: toggleProcess
-    command: ["bash", root.helperPath, "toggle", String(root.widthPercent),
-      String(root.heightPercent), root.borderColor]
+    command: root.helperArgs("toggle")
     running: false
   }
 
   Process {
     id: hideProcess
-    command: ["bash", root.helperPath, "hide"]
+    command: root.helperArgs("hide")
     running: false
   }
 
   Process {
     id: reconcileProcess
-    command: ["bash", root.helperPath, "cleanup"]
+    command: root.helperArgs("cleanup")
     running: false
   }
 
