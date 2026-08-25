@@ -9,6 +9,7 @@ BarWidget {
   Service {
     id: service
     settings: root.settings
+    moduleName: root.moduleName
   }
 
   readonly property bool showIcon: setting("showIcon", true) === true

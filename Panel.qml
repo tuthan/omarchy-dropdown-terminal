@@ -48,6 +48,10 @@ Panel {
     root.settings = entry
     root.pendingSettings = entry
     if (root.hostWidget && "settings" in root.hostWidget) root.hostWidget.settings = entry
+    // Write through immediately: with a bar on every monitor the widget has
+    // one instance per screen, and helpers spawned via the global hotkey may
+    // be served by an instance other than the one hosting this panel.
+    Qt.callLater(root.savePendingSettings)
   }
 
   function setWidth(value) { persistSettings({ widthPercent: Math.round(value) }) }
@@ -86,7 +90,7 @@ Panel {
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
-    contentWidth: panel.fittedContentWidth(Style.space(360))
+    contentWidth: panel.fittedContentWidth(Style.space(400))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
 
     PanelKeyCatcher {
@@ -221,7 +225,7 @@ Panel {
         width: parent.width
         spacing: Style.space(8)
         Button {
-          text: "Theme"
+          text: root.borderSetting === "theme" ? "✓ Theme" : "Theme"
           selected: root.borderSetting === "theme"
           tooltipText: "Follow the current Omarchy/Hyprland active border theme."
           focusable: true
@@ -231,7 +235,7 @@ Panel {
           onClicked: root.persistSettings({ borderColor: "theme" })
         }
         Button {
-          text: "Custom"
+          text: root.borderSetting !== "theme" ? "✓ Custom" : "Custom"
           selected: root.borderSetting !== "theme"
           tooltipText: "Choose a custom border color."
           focusable: true
@@ -254,57 +258,27 @@ Panel {
         width: parent.width
         spacing: Style.space(8)
         Button {
-          text: root.setting("autoHideOnFocusLoss", false) === true ? "Auto-hide: on" : "Auto-hide: off"
-          tooltipText: "Automatically hide the terminal when another window takes focus."
+          property bool on: root.setting("autoHideOnFocusLoss", false) === true
+          text: (on ? "✓ " : "") + "Auto-hide"
+          tooltipText: on
+            ? "On: the terminal hides automatically when another window takes focus, after the delay below."
+            : "Off: the terminal stays open until you toggle it away."
+          selected: on
           focusable: true
           bordered: true
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
-          onClicked: root.setAutoHide(!(root.setting("autoHideOnFocusLoss", false) === true))
+          onClicked: root.setAutoHide(!on)
         }
-        Button {
-          text: root.setting("allowSpecialFallthrough", false) === true ? "Focus through: on" : "Focus through: off"
-          focusable: true
-          bordered: true
-          foreground: root.contentForeground
-          fontFamily: root.contentFontFamily
-          onClicked: root.setSpecialFallthrough(!(root.setting("allowSpecialFallthrough", false) === true))
+        Text {
+          text: "Delay (ms)"
+          color: Util.alpha(root.contentForeground, 0.64)
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+          anchors.verticalCenter: parent.verticalCenter
         }
-      }
-
-      Row {
-        width: parent.width
-        spacing: Style.space(8)
-            Button {
-              text: root.slideFromTop ? "Slide: from top" : "Slide: native"
-              tooltipText: "Drop the terminal in from the top edge instead of Hyprland's upward special-workspace slide."
-              focusable: true
-              bordered: true
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-              onClicked: root.setSlideFromTop(!root.slideFromTop)
-            }
-      }
-
-      Row {
-        width: parent.width
-        spacing: Style.space(8)
-        Button {
-          text: root.setting("showIcon", true) === true ? "Icon: shown" : "Icon: hidden"
-          tooltipText: "Show or hide the terminal button in the bar. The hotkey still works when hidden."
-          focusable: true
-          bordered: true
-          foreground: root.contentForeground
-          fontFamily: root.contentFontFamily
-          onClicked: root.persistSettings({ showIcon: !(root.setting("showIcon", true) === true) })
-        }
-      }
-
-      Row {
-        width: parent.width
-        spacing: Style.space(8)
         NumberField {
-          label: "Delay (ms)"
+          label: ""
           value: Number(root.setting("autoHideDelayMs", 500))
           from: 0
           to: 2000
@@ -321,6 +295,47 @@ Panel {
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
           onClicked: {}
+        }
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        Button {
+          property bool on: root.slideFromTop
+          text: (on ? "✓ " : "") + "Slide from top"
+          tooltipText: on
+            ? "On: the terminal drops in from the top edge. Click to use Hyprland's native upward slide instead."
+            : "Off: Hyprland's native upward slide is used. Click to drop the terminal in from the top edge."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setSlideFromTop(!root.slideFromTop)
+        }
+        Button {
+          property bool on: root.setting("allowSpecialFallthrough", false) === true
+          text: (on ? "✓ " : "") + "Focus through"
+          tooltipText: on
+            ? "On: other windows receive mouse focus while the dropdown stays open."
+            : "Off: the dropdown keeps exclusive mouse focus. Click to let clicks reach windows behind it."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setSpecialFallthrough(!on)
+        }
+        Button {
+          property bool on: root.setting("showIcon", true) === true
+          text: (on ? "✓ " : "") + "Bar icon"
+          tooltipText: on
+            ? "On: the terminal button is shown in the bar."
+            : "Off: no terminal button in the bar. The hotkey still works."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.persistSettings({ showIcon: !on })
         }
       }
     }
