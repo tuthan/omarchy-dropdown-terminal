@@ -5,6 +5,10 @@ floating overlay on the current Hyprland workspace.
 
 ![Dropdown Terminal preview](preview.png)
 
+## Video Demo
+
+https://github.com/user-attachments/assets/f9a374ee-0e1f-4f67-b7dd-a44dcc4f5207
+
 ## Install
 
 From the plugin repository:
