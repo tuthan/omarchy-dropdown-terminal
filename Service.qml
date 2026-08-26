@@ -17,13 +17,13 @@ Item {
 
   FileView {
     id: shellConfigFile
-    path: Paths.config + "/omarchy/shell.json"
+    path: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
     watchChanges: true
   }
 
   function persistedSetting(name) {
     try {
-      var txt = shellConfigFile.text
+      var txt = shellConfigFile.text()
       if (!txt) return undefined
       var cfg = JSON.parse(txt)
       var candidates = []
