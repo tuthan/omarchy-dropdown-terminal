@@ -250,13 +250,15 @@ wait_window_y() {
   local address="$1" target="$2" timeout="$3"
   local deadline now y
 
-  deadline="$(awk -v n="${EPOCHREALTIME:-0}" -v t="$timeout" 'BEGIN { printf "%.0f", n * 1000000 + t * 1000000 }')"
+  deadline="$(awk -v n="${EPOCHREALTIME:-0}" -v t="$timeout" 'BEGIN { printf "%.6f", n + t }')"
   while :; do
     y="$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$address" \
       '.[] | select(.address == $address) | .at[1]' | head -n 1)"
     [[ "$y" =~ ^-?[0-9]+$ ]] && (( y > target - 3 && y < target + 3 )) && return 0
-    now="${EPOCHREALTIME%%.*}"
-    (( now >= deadline )) && return 1
+    now="${EPOCHREALTIME:-0}"
+    if awk -v now="$now" -v deadline="$deadline" 'BEGIN { exit !(now + 0 >= deadline + 0) }'; then
+      return 1
+    fi
     sleep 0.02
   done
 }
