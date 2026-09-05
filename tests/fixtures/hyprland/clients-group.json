@@ -1,0 +1,20 @@
+[
+  {
+    "address": "0x1000",
+    "at": [200, 100],
+    "size": [1600, 700],
+    "floating": true,
+    "monitor": 0,
+    "workspace": {"id": 1, "name": "special:dropdown-terminal"},
+    "title": "Terminal"
+  },
+  {
+    "address": "0x2000",
+    "at": [200, 100],
+    "size": [1600, 700],
+    "floating": true,
+    "monitor": 0,
+    "workspace": {"id": 1, "name": "special:dropdown-terminal"},
+    "title": "Terminal"
+  }
+]

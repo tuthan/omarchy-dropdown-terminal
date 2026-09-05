@@ -1,0 +1,6 @@
+[
+  [
+    {"name": "specialWorkspace", "enabled": true, "overridden": true, "speed": 3, "bezier": "easeOutQuint", "style": "slidevert"},
+    {"name": "borderangle", "enabled": false, "overridden": true, "speed": 4, "bezier": "linear", "style": "once"}
+  ]
+]

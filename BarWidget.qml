@@ -49,9 +49,31 @@ BarWidget {
       settingsLoader.item.toggle()
   }
 
+  function requestBindingInstall() {
+    if (!settingsLoader.item) return
+    root.open()
+    Qt.callLater(function() {
+      if (settingsLoader.item && typeof settingsLoader.item.requestBindingInstall === "function")
+        settingsLoader.item.requestBindingInstall()
+    })
+  }
+
   function setSpecialFallthrough(enabled) {
     service.applySpecialFallthrough(enabled)
   }
+
+  function installHotkey(allowConflict) {
+    service.installHotkey(allowConflict === true)
+  }
+
+  function refreshMutationStatus() {
+    service.refreshMutationStatus()
+  }
+
+  readonly property string bindingStatus: service.bindingStatus
+  readonly property var bindingConflicts: service.bindingConflicts
+  readonly property bool bindingStatusReady: service.bindingStatusReady
+  readonly property string fallthroughStatus: service.fallthroughStatus
 
   Loader {
     id: settingsLoader
@@ -74,7 +96,7 @@ BarWidget {
       ? "Opening terminal…"
       : "Left-click: terminal · Middle-click: settings · Right-click: bind Ctrl + Grave"
     onPressed: function(button) {
-      if (button === Qt.RightButton) service.installHotkey()
+      if (button === Qt.RightButton) root.requestBindingInstall()
       else if (button === Qt.MiddleButton) root.toggleSettings()
       else if (button === Qt.LeftButton) service.toggle()
     }

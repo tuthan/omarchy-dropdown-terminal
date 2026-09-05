@@ -1,0 +1,25 @@
+[
+  {
+    "id": 0,
+    "name": "DP-1",
+    "x": 0,
+    "y": 0,
+    "width": 3440,
+    "height": 1440,
+    "scale": 1,
+    "focused": true,
+    "specialWorkspace": {"name": ""
+    }
+  },
+  {
+    "id": 1,
+    "name": "HEADLESS-2",
+    "x": 3440,
+    "y": 0,
+    "width": 1920,
+    "height": 1080,
+    "scale": 1.25,
+    "focused": false,
+    "specialWorkspace": {"name": "special:dropdown-terminal"}
+  }
+]

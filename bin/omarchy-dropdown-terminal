@@ -5,13 +5,20 @@ set -u
 special_workspace="dropdown-terminal"
 legacy_workspace="dropdown-terminal-hidden"
 
+debug() {
+  [[ "${YADTM_DEBUG:-}" == "1" ]] || return 0
+  # Deliberately accept only already-classified facts here. Never pass command
+  # strings to this function: compositor commands can contain user data.
+  printf 'Dropdown Terminal [debug]: %s\n' "$*" >&2
+}
+
 die() {
   printf 'Dropdown Terminal: %s\n' "$1" >&2
   exit 1
 }
 
 action="${1:-toggle}"
-[[ "$action" == "toggle" || "$action" == "hide" || "$action" == "cleanup" ]] || die "unknown action: $action"
+[[ "$action" == "toggle" || "$action" == "hide" || "$action" == "cleanup" || "$action" == "status" ]] || die "unknown action: $action"
 
 window_width_percent="${2:-90}"
 window_height_percent="${3:-45}"
@@ -73,30 +80,13 @@ state_dir() {
 }
 
 state_root="$(state_dir)" || exit $?
-address_file="$state_root/address"
-animation_file="$state_root/special-animation"
+state_file="$state_root/io.github.tuthan.dropdown-terminal.state.json"
+legacy_address_file="$state_root/address"
+animation_file="$state_root/io.github.tuthan.dropdown-terminal.special-animation"
+legacy_animation_file="$state_root/special-animation"
+launch_file="$state_root/io.github.tuthan.dropdown-terminal.launch"
 
-# Serialize every invocation behind one lock: overlapping runs would otherwise
-# snapshot the animation config mid-suppression and later "restore" the
-# suppressed values. The shell instantiates the widget once per monitor, so a
-# single hotkey press arrives as two near-simultaneous toggles with separate
-# QML state; a toggle that finds the lock held is therefore a duplicate press,
-# not a queued intent, and must be dropped. Other actions queue briefly.
-# The name is plugin-specific because state_root may be XDG_RUNTIME_DIR
-# itself, which other programs also write to.
-exec 9>"$state_root/io.github.tuthan.dropdown-terminal.lock" 2>/dev/null || true
-if [[ "$action" == "toggle" ]]; then
-  flock -n 9 || exit 0
-else
-  flock -w 3 9 || exit 0
-fi
-
-# Terminating signals must not resume execution after the handler; exiting
-# with the conventional code runs the EXIT restoration path armed by
-# suppress_special_animation, or nothing when suppression was never engaged.
-trap 'exit 130' INT
-trap 'exit 143' TERM
-trap 'exit 129' HUP
+debug "action=$action"
 
 hl_dispatch() {
   hyprctl eval "hl.dispatch($1)"
@@ -173,6 +163,8 @@ restore_special_animation() {
   IFS=$'\t' read -r speed bezier style <<<"$saved_special_animation"
   saved_special_animation=""
   rm -f "$animation_file" 2>/dev/null || true
+  rm -f "$legacy_animation_file" 2>/dev/null || true
+  debug "animation restore speed=$speed style=$style"
 
   [[ "$speed" =~ ^[0-9]+([.][0-9]+)?$ ]] || return 0
   bezier="$(lua_string "$bezier")" || return 0
@@ -183,15 +175,12 @@ restore_special_animation() {
 # A run killed with SIGKILL cannot restore the animations itself. Any marker
 # still on disk after a few seconds belongs to such a run, never to a live one.
 repair_special_animation() {
-  local modified now
+  local marker="$animation_file"
+  [[ -s "$marker" ]] || marker="$legacy_animation_file"
+  [[ -s "$marker" ]] || return 0
 
-  [[ -s "$animation_file" ]] || return 0
-  modified="$(stat -c '%Y' "$animation_file" 2>/dev/null)" || return 0
-  now="$(date +%s)"
-  [[ "$modified" =~ ^[0-9]+$ && "$now" =~ ^[0-9]+$ ]] || return 0
-  (( now - modified < 5 )) && return 0
-
-  saved_special_animation="$(cat "$animation_file" 2>/dev/null || true)"
+  saved_special_animation="$(cat "$marker" 2>/dev/null || true)"
+  debug "animation repair marker=$marker"
   restore_special_animation
 }
 
@@ -211,6 +200,7 @@ suppress_special_animation() {
   # leaving the reveal fast would silently flatten every other special
   # workspace until a reload or until the next run repairs it.
   printf '%s\n' "$saved_special_animation" > "$animation_file" 2>/dev/null || true
+  debug "animation snapshot=stored"
   trap restore_special_animation EXIT
   hyprctl eval "hl.animation({ leaf = \"specialWorkspace\", enabled = true, speed = 0.1, bezier = $bezier, style = $style })" >/dev/null 2>&1 || true
 }
@@ -248,17 +238,27 @@ move_animation_seconds() {
 # only be toggled once the slide has finished.
 wait_window_y() {
   local address="$1" target="$2" timeout="$3"
-  local deadline now y
+  local attempts y i
 
-  deadline="$(awk -v n="${EPOCHREALTIME:-0}" -v t="$timeout" 'BEGIN { printf "%.0f", n * 1000000 + t * 1000000 }')"
-  while :; do
+  # The sleep already defines the sampling unit. A bounded iteration count
+  # avoids clock-unit mistakes and makes the lifecycle finite even when the
+  # compositor refuses a move.
+  attempts="$(awk -v t="$timeout" 'BEGIN { n = int((t / 0.02) + 1); if (n < 1) n = 1; print n }')"
+  for ((i = 0; i < attempts; i++)); do
+    client_exists "$address" || {
+      debug "wait address=$address result=client-missing"
+      return 1
+    }
     y="$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$address" \
       '.[] | select(.address == $address) | .at[1]' | head -n 1)"
-    [[ "$y" =~ ^-?[0-9]+$ ]] && (( y > target - 3 && y < target + 3 )) && return 0
-    now="${EPOCHREALTIME%%.*}"
-    (( now >= deadline )) && return 1
+    if [[ "$y" =~ ^-?[0-9]+$ ]] && (( y > target - 3 && y < target + 3 )); then
+      debug "wait address=$address target=$target result=reached"
+      return 0
+    fi
     sleep 0.02
   done
+  debug "wait address=$address target=$target result=timeout"
+  return 1
 }
 
 compute_geometry_on() {
@@ -276,13 +276,15 @@ compute_geometry_on() {
   #
   # The whole record is fetched in ONE query: sampling fields individually can
   # straddle a focus change and mix two monitors' origins and dimensions.
-  local filter='select(.focused)'
   if [[ "$target" =~ ^[0-9]+$ ]]; then
-    filter="select(.id == $target)"
+    mon_json="$(hyprctl monitors -j 2>/dev/null | jq -c --argjson target "$target" \
+      '.[] | select(.id == $target)' | head -n 1)"
   elif [[ -n "$target" ]]; then
-    filter="select(.name == \"$target\")"
+    mon_json="$(hyprctl monitors -j 2>/dev/null | jq -c --arg target "$target" \
+      '.[] | select(.name == $target)' | head -n 1)"
+  else
+    mon_json="$(hyprctl monitors -j 2>/dev/null | jq -c '.[] | select(.focused)' | head -n 1)"
   fi
-  mon_json="$(hyprctl monitors -j 2>/dev/null | jq -c ".[] | $filter" | head -n 1)"
   [[ -n "$mon_json" ]] || return 1
   monitor_x="$(jq -r '.x // 0' <<<"$mon_json")"
   monitor_y="$(jq -r '.y // 0' <<<"$mon_json")"
@@ -304,6 +306,7 @@ compute_geometry_on() {
   top_margin=$(( monitor_y + top_margin ))
   window_x=$(( monitor_x + window_x ))
   parked_y=$(( monitor_y - (window_height + 60) ))
+  debug "geometry monitor=$target x=$window_x y=$top_margin width=$window_width height=$window_height parkedY=$parked_y"
 }
 
 compute_geometry() {
@@ -437,23 +440,25 @@ hide_window() {
   hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
 }
 
-# True when the window intersects any connected monitor's rectangle rather
-# than sitting parked off-screen. A script killed mid-toggle can leave the
-# workspace visible but the window parked; classifying that as "hidden" keeps
-# a single keypress recovering it.
+# True when the window intersects its owner monitor's rectangle rather than
+# sitting parked off-screen. Testing every output is wrong for vertically
+# stacked layouts: a parked rectangle can overlap a neighbour while still
+# being parked for the monitor that owns the client.
 #
 # An unreadable query also reports on-screen: the hide branch is self-healing
 # (a later press recovers either way), while issuing a recovery move against a
 # transiently unreadable window would fight whatever animation is in flight.
 window_on_screen() {
   local address="$1"
-  local rect
+  local rect owner_monitor
 
   rect="$(hyprctl clients -j 2>/dev/null | jq -c --arg address "$address" \
     '.[] | select(.address == $address) | {x: .at[0], y: .at[1], w: .size[0], h: .size[1]}' | head -n 1)"
   [[ "$rect" == "{"* ]] || return 0
-  hyprctl monitors -j 2>/dev/null | jq -e --argjson win "$rect" \
-    'any(.[]; (.x < $win.x + $win.w) and ($win.x < .x + .width)
+  owner_monitor="$(client_monitor "$address")"
+  [[ "$owner_monitor" =~ ^[0-9]+$ ]] || return 0
+  hyprctl monitors -j 2>/dev/null | jq -e --argjson win "$rect" --argjson owner "$owner_monitor" \
+    'any(.[]; .id == $owner and (.x < $win.x + $win.w) and ($win.x < .x + .width)
           and (.y < $win.y + $win.h) and ($win.y < .y + .height))' >/dev/null 2>&1
 }
 
@@ -475,6 +480,126 @@ client_monitor() {
   hyprctl clients -j 2>/dev/null \
     | jq -r --arg address "$address" '.[] | select(.address == $address) | .monitor' \
     | head -n 1
+}
+
+state_clients=()
+state_active=""
+legacy_migration=0
+
+append_unique() {
+  local value="$1"
+  local existing
+  [[ -n "$value" ]] || return 0
+  for existing in "${state_clients[@]:-}"; do
+    [[ "$existing" == "$value" ]] && return 0
+  done
+  state_clients+=("$value")
+}
+
+read_state() {
+  state_clients=()
+  state_active=""
+  legacy_migration=0
+
+  if [[ -f "$state_file" ]]; then
+    # A missing, malformed, or future-version document is deliberately treated
+    # as a cache miss. The compositor recovery scan below remains authoritative.
+    if jq -e 'type == "object" and .version == 1 and (.clients | type) == "array"' \
+      "$state_file" >/dev/null 2>&1; then
+      while IFS= read -r candidate; do
+        is_client_address "$candidate" && append_unique "$candidate"
+      done < <(jq -r '.clients[]? | strings' "$state_file" 2>/dev/null)
+      state_active="$(jq -r 'if (.active | type) == "string" then .active else "" end' \
+        "$state_file" 2>/dev/null || true)"
+    fi
+  fi
+  # An interrupted upgrade can leave both a broken new file and the old
+  # address. Treat the legacy handle as another recovery hint; it is removed
+  # only after a valid new document has been published.
+  if [[ -f "$legacy_address_file" && ${#state_clients[@]} -eq 0 ]]; then
+    legacy_migration=1
+    candidate="$(head -n 1 "$legacy_address_file" 2>/dev/null || true)"
+    is_client_address "$candidate" && state_clients+=("$candidate")
+    state_active="$candidate"
+  fi
+}
+
+write_state() {
+  local active="$1"
+  shift
+  local temp clients_json now
+  local -a clients=("$@")
+
+  if (( ${#clients[@]} == 0 )); then
+    clients_json='[]'
+  else
+    clients_json="$(printf '%s\n' "${clients[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')" || return 1
+  fi
+  now="$(date +%s)" || return 1
+  temp="$(mktemp "$state_root/.io.github.tuthan.dropdown-terminal.state.XXXXXX")" || return 1
+  if ! jq -cn --argjson clients "$clients_json" --arg active "$active" --argjson now "$now" \
+    '{version: 1, clients: $clients, active: (if $active == "" then null else $active end), updatedAt: $now}' \
+    > "$temp"; then
+    rm -f "$temp"
+    return 1
+  fi
+  chmod 600 "$temp" 2>/dev/null || true
+  if ! mv -f "$temp" "$state_file"; then
+    rm -f "$temp"
+    return 1
+  fi
+  debug "state active=$active clients=${#clients[@]}"
+  return 0
+}
+
+recover_clients() {
+  recovery_clients=()
+  while IFS= read -r candidate; do
+    is_client_address "$candidate" || continue
+    append_recovery_unique "$candidate"
+  done < <(hyprctl clients -j 2>/dev/null | jq -r --arg special "special:$special_workspace" \
+    '.[] | select(.workspace.name == $special) | .address' 2>/dev/null)
+  while IFS= read -r candidate; do
+    is_client_address "$candidate" || continue
+    append_recovery_unique "$candidate"
+  done < <(hyprctl clients -j 2>/dev/null | jq -r \
+    '.[] | select(.workspace.name == "dropdown-terminal" or .workspace.name == "dropdown-terminal-hidden") | .address' 2>/dev/null)
+}
+
+append_recovery_unique() {
+  local value="$1"
+  local existing
+  for existing in "${recovery_clients[@]:-}"; do
+    [[ "$existing" == "$value" ]] && return 0
+  done
+  recovery_clients+=("$value")
+}
+
+choose_terminal_address() {
+  local candidate
+  terminal_address=""
+  # Prefer the active cached client, then other cached clients, then the full
+  # compositor recovery list. No recovery path uses head -n 1: the array shape
+  # is intentionally ready for the multi-client phase.
+  if is_client_address "$state_active" && client_exists "$state_active"; then
+    terminal_address="$state_active"
+  else
+    for candidate in "${state_clients[@]:-}"; do
+      if is_client_address "$candidate" && client_exists "$candidate"; then
+        terminal_address="$candidate"
+        break
+      fi
+    done
+  fi
+  if [[ -z "$terminal_address" ]]; then
+    recover_clients
+    for candidate in "${recovery_clients[@]:-}"; do
+      if client_exists "$candidate"; then
+        terminal_address="$candidate"
+        break
+      fi
+    done
+  fi
 }
 
 is_client_address() {
@@ -506,6 +631,207 @@ special_visible() {
       'any(.[]; .specialWorkspace.name == $special)' >/dev/null 2>&1
 }
 
+client_record() {
+  local address="$1"
+  hyprctl clients -j 2>/dev/null | jq -c --arg address "$address" \
+    '.[] | select(.address == $address)' | head -n 1
+}
+
+emit_status() {
+  local record active monitor_json visible focused x y width height clients_json candidate existing
+  local -a candidates=()
+  local -a live_clients=()
+
+  read_state
+  if is_client_address "$state_active"; then candidates+=("$state_active"); fi
+  for candidate in "${state_clients[@]:-}"; do candidates+=("$candidate"); done
+  recover_clients
+  for candidate in "${recovery_clients[@]:-}"; do candidates+=("$candidate"); done
+
+  for candidate in "${candidates[@]:-}"; do
+    if is_client_address "$candidate" && client_exists "$candidate"; then
+      for existing in "${live_clients[@]:-}"; do
+        [[ "$existing" == "$candidate" ]] && continue 2
+      done
+      live_clients+=("$candidate")
+    fi
+  done
+
+  active=""
+  for candidate in "${candidates[@]:-}"; do
+    if is_client_address "$candidate" && client_exists "$candidate"; then
+      active="$candidate"
+      break
+    fi
+  done
+  if [[ -n "$active" ]]; then
+    clients_json="$(printf '%s\n' "${live_clients[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+    record="$(client_record "$active")"
+  else
+    clients_json='[]'
+    record=''
+  fi
+
+  monitor_json=null
+  x=null
+  y=null
+  width=null
+  height=null
+  if [[ "$record" == "{"* ]]; then
+    monitor_json="$(jq -c '.monitor // null' <<<"$record")"
+    x="$(jq -c '.at[0] // null' <<<"$record")"
+    y="$(jq -c '.at[1] // null' <<<"$record")"
+    width="$(jq -c '.size[0] // null' <<<"$record")"
+    height="$(jq -c '.size[1] // null' <<<"$record")"
+  fi
+  visible=false
+  special_visible && visible=true
+  focused=false
+  if [[ -n "$active" ]] && [[ "$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // ""')" == "$active" ]]; then
+    focused=true
+  fi
+
+  jq -cn --argjson clients "$clients_json" --arg active "$active" \
+    --argjson monitor "$monitor_json" --argjson visible "$visible" --argjson focused "$focused" \
+    --argjson x "$x" --argjson y "$y" --argjson width "$width" --argjson height "$height" \
+    '{version: 1, clients: $clients, active: (if $active == "" then null else $active end),
+      monitor: $monitor, visible: $visible, focused: $focused, x: $x, y: $y,
+      width: $width, height: $height}'
+}
+
+launch_pids=""
+launch_pid=""
+pending_before=""
+
+collect_descendant_pids() {
+  local parent="$1" child
+  [[ "$parent" =~ ^[0-9]+$ ]] || return 0
+  [[ -d "/proc/$parent" ]] || return 0
+  printf '%s\n' "$parent"
+  command -v pgrep >/dev/null 2>&1 || return 0
+  while IFS= read -r child; do
+    [[ "$child" =~ ^[0-9]+$ ]] || continue
+    collect_descendant_pids "$child"
+  done < <(pgrep -P "$parent" 2>/dev/null || true)
+}
+
+append_launch_pid() {
+  local pid="$1" existing
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  while IFS= read -r existing; do
+    [[ "$existing" == "$pid" ]] && return 0
+  done <<<"$launch_pids"
+  launch_pids="${launch_pids:+$launch_pids$'\n'}$pid"
+}
+
+observe_launch_pids() {
+  local pid
+  [[ "$1" =~ ^[0-9]+$ ]] || return 0
+  # Keep the launcher itself even if it exits between the background fork and
+  # the first /proc traversal; a directly mapped client may carry this PID.
+  append_launch_pid "$1"
+  while IFS= read -r pid; do
+    append_launch_pid "$pid"
+  done < <(collect_descendant_pids "$1")
+}
+
+new_client_from_json() {
+  local clients_json="$1" before="$2" known_pids="$3"
+  jq -r --arg before "$before" --arg known "$known_pids" '
+    ($known | split("\n")) as $known_pids
+    | [ .[]
+        | select(.address != null)
+        | .address as $address
+        | select((($before | split("\n")) | index($address)) == null)
+        | .pid as $pid
+        | select(($known_pids | index(($pid | tostring))) != null)
+      ]
+    | sort_by(.pid)
+    | .[0].address // empty' <<<"$clients_json"
+}
+
+new_client_from() {
+  local before="$1" known_pids="${2:-${launch_pids:-}}" clients_json
+  clients_json="$(hyprctl clients -j 2>/dev/null)" || return 1
+  new_client_from_json "$clients_json" "$before" "$known_pids"
+}
+
+poll_new_client() {
+  local before="$1" launcher_pid="${2:-}" known_pids="${3:-${launch_pids:-}}"
+  local current i previous_pids
+  launch_pids="$known_pids"
+  for ((i = 0; i < 40; i++)); do
+    previous_pids="$launch_pids"
+    observe_launch_pids "$launcher_pid"
+    if [[ "$launch_pids" != "$previous_pids" ]]; then
+      write_launch_marker "$before" "$launcher_pid" "$launch_pids" || true
+    fi
+    current="$(new_client_from "$before" "$launch_pids")"
+    if is_client_address "$current"; then
+      printf '%s\n' "$current"
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+write_launch_marker() {
+  local before="$1" launcher_pid="${2:-}" pids="${3:-}" temp before_json pids_json started
+  before_json="$(printf '%s\n' "$before" | jq -Rsc 'split("\n") | map(select(length > 0))')" || return 1
+  pids_json="$(printf '%s\n' "$pids" | jq -Rsc 'split("\n") | map(select(length > 0 and test("^[0-9]+$")))')" || return 1
+  started="$(date +%s)" || return 1
+  temp="$(mktemp "$state_root/.io.github.tuthan.dropdown-terminal.launch.XXXXXX")" || return 1
+  if ! jq -cn --argjson before "$before_json" --argjson pids "$pids_json" \
+    --arg launcherPid "$launcher_pid" --argjson startedAt "$started" \
+    '{version: 1, startedAt: $startedAt,
+      launcherPid: (if $launcherPid == "" then null else ($launcherPid | tonumber) end),
+      launcherPids: $pids, before: $before}' > "$temp"; then
+    rm -f "$temp"
+    return 1
+  fi
+  chmod 600 "$temp" 2>/dev/null || true
+  if ! mv -f "$temp" "$launch_file"; then
+    rm -f "$temp"
+    return 1
+  fi
+  debug "launch marker=stored"
+}
+
+pending_launch_before() {
+  [[ -s "$launch_file" ]] || return 1
+  if jq -e 'type == "object" and .version == 1 and (.before | type) == "array"' \
+    "$launch_file" >/dev/null 2>&1; then
+    launch_started="$(jq -r '.startedAt // 0' "$launch_file" 2>/dev/null || true)"
+    launch_pid="$(jq -r '.launcherPid // empty' "$launch_file" 2>/dev/null || true)"
+    launch_pids="$(jq -r '.launcherPids[]? | strings' "$launch_file" 2>/dev/null || true)"
+    # There is intentionally no age cutoff. The marker is the durable link
+    # between the launcher process tree and a client that maps after this
+    # helper's initial polling window.
+    pending_before="$(jq -r '.before[]? | strings' "$launch_file" 2>/dev/null || true)"
+    return 0
+  fi
+
+  # Read the pre-1.4 marker format once so an interrupted upgrade can still be
+  # adopted safely. It has no process lineage, therefore it will not adopt an
+  # unrelated new client.
+  launch_started="$(head -n 1 "$launch_file" 2>/dev/null || true)"
+  [[ "$launch_started" =~ ^[0-9]+$ ]] || return 1
+  launch_pid=""
+  launch_pids=""
+  pending_before="$(tail -n +2 "$launch_file" 2>/dev/null || true)"
+}
+
+# Tests source this file to exercise the pure geometry, state, and escaping
+# helpers without contacting a compositor. Normal invocations always continue
+# into the action dispatcher below.
+if [[ "${YADTM_LIB_ONLY:-0}" == "1" ]]; then
+  if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+  fi
+  exit 0
+fi
+
 focus_window() {
   local window_lua="$1"
 
@@ -514,23 +840,69 @@ focus_window() {
   hl_dispatch "hl.dsp.focus({ window = $window_lua })" >/dev/null
 }
 
+# `status` is intentionally outside the lock and before repair. It is a
+# diagnostic snapshot, so it must neither wait for an animation nor restore
+# global compositor state as a side effect.
+if [[ "$action" == "status" ]]; then
+  emit_status
+  exit 0
+fi
+
+# Serialize every mutating invocation behind one lock: overlapping runs would
+# otherwise snapshot the animation config mid-suppression and later restore
+# the suppressed values. Toggle is a drop-on-duplicate action; reconciliation
+# actions queue briefly. A failed descriptor open is an infrastructure error,
+# not a held lock, and must be reported distinctly.
+lock_file="$state_root/io.github.tuthan.dropdown-terminal.lock"
+if ! exec 9>"$lock_file" 2>/dev/null; then
+  die "could not open lock file: $lock_file"
+fi
+if [[ "$action" == "toggle" ]]; then
+  flock -n 9
+  lock_result=$?
+  if (( lock_result == 1 )); then
+    debug "lock action=$action result=duplicate"
+    exit 0
+  elif (( lock_result != 0 )); then
+    die "could not acquire lock (flock error $lock_result)"
+  fi
+else
+  flock -w 3 9
+  lock_result=$?
+  if (( lock_result != 0 )); then
+    if (( lock_result == 1 )); then
+      die "timed out waiting for dropdown terminal lock"
+    fi
+    die "could not acquire lock (flock error $lock_result)"
+  fi
+fi
+debug "lock action=$action result=acquired"
+
+# Terminating signals must not resume execution after the handler; exiting
+# with the conventional code runs the EXIT restoration path armed by
+# suppress_special_animation, or nothing when suppression was never engaged.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
 repair_special_animation
 
-terminal_address="$(cat "$address_file" 2>/dev/null || true)"
-
-# Recover the tracked client after shell restarts. Also migrate a client left
-# in the old visible workspace used by earlier plugin versions.
-if [[ -z "$terminal_address" ]] || ! client_exists "$terminal_address"; then
-  terminal_address="$(hyprctl clients -j 2>/dev/null | jq -r --arg special "special:$special_workspace" \
-    '.[] | select(.workspace.name == $special) | .address' | head -n 1)"
-fi
-if [[ -z "$terminal_address" ]]; then
-  terminal_address="$(hyprctl clients -j 2>/dev/null | jq -r \
-    '.[] | select(.workspace.name == "dropdown-terminal" or .workspace.name == "dropdown-terminal-hidden") | .address' | head -n 1)"
-fi
+read_state
+recover_clients=()
+choose_terminal_address
+debug "recovery active=${terminal_address:-none} cached=${#state_clients[@]}"
 
 if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && client_exists "$terminal_address"; then
-  printf '%s\n' "$terminal_address" > "$address_file"
+  if ! write_state "$terminal_address" "$terminal_address"; then
+    die "could not publish terminal state"
+  fi
+  # Retire the legacy address only after the versioned document is safely in
+  # place. Keeping this branch for one release makes interrupted upgrades
+  # recoverable.
+  if (( legacy_migration )); then
+    rm -f "$legacy_address_file" 2>/dev/null || true
+    legacy_migration=0
+  fi
   terminal_workspace="$(client_workspace "$terminal_address")"
   terminal_window="$(lua_string "address:$terminal_address")" || die "invalid terminal address"
 
@@ -615,38 +987,58 @@ if [[ "$action" == "hide" || "$action" == "cleanup" ]]; then
   exit 0
 fi
 
-before_clients="$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)"
-
-# Launch through Omarchy so xdg-terminal-exec selects the configured emulator.
-# 9>&- keeps the lock fd out of the launched terminal: it must outlive this
-# script without holding the lock, or every later invocation would block.
-omarchy launch terminal >/dev/null 2>&1 9>&- &
-
-for _ in $(seq 1 40); do
-  current="$(hyprctl clients -j 2>/dev/null | jq -r --arg before "$before_clients" '
-    .[] | .address as $address
-    | select((($before | split("\n")) | index($address)) == null)
-    | $address' | head -n 1)"
-  current="${current:-0x0}"
-
-  if [[ "$current" != "0x0" ]] && is_client_address "$current"; then
-    current_window="$(lua_string "address:$current")" || die "invalid terminal address"
-    printf '%s\n' "$current" > "$address_file"
-    # Keep first-launch setup invisible while the initial window is moved out
-    # of the normal layout and configured at its final geometry. The mask is
-    # lifted here rather than inside show_window because the native-slide
-    # setting never unmasks; with a top drop, reveal_parked simply re-masks
-    # and lifts it at the moment the workspace becomes visible.
-    hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $current_window, prop = \"opacity\", value = 0 }))" >/dev/null 2>&1 || true
-    compute_geometry
-    size_window "$current"
-    move_window "$current_window" "$top_margin"
-    hl_dispatch "hl.dsp.window.move({ workspace = \"special:$special_workspace\", follow = false, window = $current_window })" >/dev/null
-    hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $current_window, prop = \"opacity\", value = 1 }))" >/dev/null 2>&1 || true
-    show_window "$current"
-    exit $?
+before_clients=""
+pending_launch=0
+launch_pid=""
+launch_pids=""
+if [[ -e "$launch_file" ]]; then
+  if pending_launch_before; then
+    before_clients="$pending_before"
+    pending_launch=1
+    debug "launch marker=pending"
+  else
+    # A malformed marker cannot provide a safe baseline or process lineage.
+    rm -f "$launch_file" 2>/dev/null || true
   fi
-  sleep 0.1
-done
+fi
 
-exit 0
+if (( ! pending_launch )); then
+  before_clients="$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)"
+  # Launch through Omarchy so xdg-terminal-exec selects the configured
+  # emulator. 9>&- keeps the lock fd out of the launched terminal: it must
+  # outlive this script without holding the lock.
+  omarchy launch terminal >/dev/null 2>&1 9>&- &
+  launch_pid="$!"
+  launch_pids=""
+  # Capture the complete launch lineage before polling. A compositor client is
+  # adopted only when its PID belongs to this observed tree; unrelated windows
+  # created concurrently remain untouched.
+  observe_launch_pids "$launch_pid"
+  write_launch_marker "$before_clients" "$launch_pid" "$launch_pids" \
+    || die "could not record pending terminal launch"
+fi
+
+current="$(poll_new_client "$before_clients" "$launch_pid" "$launch_pids" || true)"
+if ! is_client_address "$current"; then
+  # Keep the marker so the next toggle adopts a slow-mapping terminal instead
+  # of launching a second one. This is an actionable failure, not a silent
+  # successful no-op.
+  die "terminal launch is still pending; retry the toggle to adopt it"
+fi
+rm -f "$launch_file" 2>/dev/null || true
+
+current_window="$(lua_string "address:$current")" || die "invalid terminal address"
+write_state "$current" "$current" || die "could not publish terminal state"
+# Keep first-launch setup invisible while the initial window is moved out of
+# the normal layout and configured at its final geometry. The mask is lifted
+# here rather than inside show_window because the native-slide setting never
+# unmasks; with a top drop, reveal_parked re-masks and lifts it at the moment
+# the workspace becomes visible.
+hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $current_window, prop = \"opacity\", value = 0 }))" >/dev/null 2>&1 || true
+compute_geometry
+size_window "$current"
+move_window "$current_window" "$top_margin"
+hl_dispatch "hl.dsp.window.move({ workspace = \"special:$special_workspace\", follow = false, window = $current_window })" >/dev/null
+hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $current_window, prop = \"opacity\", value = 1 }))" >/dev/null 2>&1 || true
+show_window "$current"
+exit $?

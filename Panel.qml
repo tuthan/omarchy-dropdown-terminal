@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
+import Quickshell
 import qs.Commons
 import qs.Ui
 
@@ -12,6 +13,10 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
   property var pendingSettings: null
+  property string confirmKind: ""
+  property double confirmOpenedAt: 0
+  property bool bindingPreflightWaiting: false
+  readonly property bool confirming: confirmKind !== ""
   readonly property var barIdentity: hostWidget || root
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
@@ -22,6 +27,47 @@ Panel {
     return match ? Qt.color("#" + match[1]) : Color.accent
   }
 
+  readonly property string hyprConfigRoot: (Quickshell.env("XDG_CONFIG_HOME") ||
+    (Quickshell.env("HOME") + "/.config")) + "/hypr"
+  readonly property string bindingConfigPath: root.hyprConfigRoot + "/bindings.lua"
+  readonly property string inputConfigPath: root.hyprConfigRoot + "/input.lua"
+  readonly property string bindingLine: 'hl.bind("CTRL + GRAVE", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))'
+  readonly property string fallthroughBlock: '-- BEGIN Dropdown Terminal special fallthrough\nhl.config({\n  input = {\n    special_fallthrough = true,\n  },\n})\n-- END Dropdown Terminal special fallthrough'
+  readonly property int bindingConflictCount: root.hostWidget && Array.isArray(root.hostWidget.bindingConflicts)
+    ? root.hostWidget.bindingConflicts.length : 0
+  readonly property string bindingConflictSummary: {
+    var conflicts = root.hostWidget && Array.isArray(root.hostWidget.bindingConflicts)
+      ? root.hostWidget.bindingConflicts : []
+    if (conflicts.length === 0) return ""
+    var lines = []
+    var limit = Math.min(conflicts.length, 4)
+    for (var i = 0; i < limit; i++) {
+      var conflict = conflicts[i] || {}
+      lines.push("Line " + String(conflict.lineNumber || "?") + ": " + String(conflict.text || ""))
+    }
+    if (conflicts.length > limit) lines.push("…and " + (conflicts.length - limit) + " more")
+    return "\n\nExisting Ctrl + Grave conflict(s):\n" + lines.join("\n")
+      + "\nThe helper will add the managed binding only after this explicit confirmation."
+  }
+  readonly property string confirmMessage: {
+    if (root.confirmKind === "binding")
+      return "Add the exact Ctrl + Grave binding?\n\nChord: CTRL + GRAVE\nTarget: " + root.bindingConfigPath
+        + "\nEffect: invokes io.github.tuthan.dropdown-terminal:toggle\nBackup: timestamped copy before atomic replacement\nRemoval: remove only the managed binding block."
+        + root.bindingConflictSummary
+    if (root.confirmKind === "fallthrough-enable")
+      return "Enable focus through the dropdown?\n\nTarget: " + root.inputConfigPath
+        + "\nEffect: normal windows can receive pointer focus while the dropdown is visible.\nManaged block:\n" + root.fallthroughBlock
+        + "\nBackup: timestamped copy before atomic replacement\nRemoval: disable removes only this managed block."
+    if (root.confirmKind === "fallthrough-disable")
+      return "Remove Dropdown Terminal's focus-through override?\n\nTarget: " + root.inputConfigPath
+        + "\nRemoval: removes only the marked special_fallthrough block; unrelated input settings stay unchanged."
+    return ""
+  }
+
+  readonly property string confirmAction: root.confirmKind === "binding"
+    ? (root.bindingConflictCount > 0 ? "Add anyway" : "Add binding")
+    : (root.confirmKind === "fallthrough-enable" ? "Enable" : "Remove")
+
   function savePendingSettings() {
     if (!root.pendingSettings) return
     var entry = root.pendingSettings
@@ -30,7 +76,10 @@ Panel {
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
+  onOpenedChanged: if (!opened) root.cancelConfirmation()
+
   function close() {
+    root.cancelConfirmation()
     root.controller.hide()
     Qt.callLater(root.savePendingSettings)
   }
@@ -61,6 +110,70 @@ Panel {
     persistSettings({ allowSpecialFallthrough: value })
     if (root.hostWidget && typeof root.hostWidget.setSpecialFallthrough === "function")
       root.hostWidget.setSpecialFallthrough(value)
+  }
+
+  function beginConfirmation(kind) {
+    if (root.confirming) return
+    root.bindingPreflightWaiting = false
+    root.confirmKind = kind
+    root.confirmOpenedAt = Date.now()
+    confirmDialog.selectedIndex = 0
+    Qt.callLater(function() { if (root.confirming) confirmDialog.forceActiveFocus() })
+  }
+
+  function cancelConfirmation() {
+    root.bindingPreflightWaiting = false
+    bindingPreflightTimer.stop()
+    root.confirmKind = ""
+    root.confirmOpenedAt = 0
+  }
+
+  function requestBindingInstall() {
+    if (root.hostWidget && typeof root.hostWidget.refreshMutationStatus === "function")
+      root.hostWidget.refreshMutationStatus()
+    if (root.hostWidget && root.hostWidget.bindingStatusReady === false) {
+      root.bindingPreflightWaiting = true
+      bindingPreflightTimer.restart()
+      return
+    }
+    if (root.hostWidget && root.hostWidget.bindingStatus === "installed") return
+    root.beginConfirmation("binding")
+  }
+
+  Timer {
+    id: bindingPreflightTimer
+    interval: 50
+    repeat: true
+    onTriggered: {
+      if (!root.bindingPreflightWaiting) {
+        stop()
+        return
+      }
+      if (!root.hostWidget || root.hostWidget.bindingStatusReady !== false) {
+        stop()
+        root.bindingPreflightWaiting = false
+        if (!root.hostWidget || root.hostWidget.bindingStatus !== "installed")
+          root.beginConfirmation("binding")
+      }
+    }
+  }
+
+  function requestSpecialFallthrough(value) {
+    if (value && root.hostWidget && root.hostWidget.fallthroughStatus === "installed") return
+    root.beginConfirmation(value ? "fallthrough-enable" : "fallthrough-disable")
+  }
+
+  function acceptConfirmation() {
+    var kind = root.confirmKind
+    root.cancelConfirmation()
+    if (kind === "binding") {
+      if (root.hostWidget && typeof root.hostWidget.installHotkey === "function")
+        root.hostWidget.installHotkey(root.bindingConflictCount > 0)
+    } else if (kind === "fallthrough-enable") {
+      root.setSpecialFallthrough(true)
+    } else if (kind === "fallthrough-disable") {
+      root.setSpecialFallthrough(false)
+    }
   }
   function setDelay(value) { persistSettings({ autoHideDelayMs: Math.round(value) }) }
   function setSlideFromTop(value) { persistSettings({ slideFromTop: value }) }
@@ -96,6 +209,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: root.confirming || root.bindingPreflightWaiting
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
     }
@@ -112,6 +226,18 @@ Panel {
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.title
         font.bold: true
+      }
+
+      Text {
+        width: parent.width
+        textFormat: Text.PlainText
+        text: "Binding: " + (root.hostWidget ? root.hostWidget.bindingStatus : "unavailable")
+          + (root.bindingConflictCount > 0 ? " (" + root.bindingConflictCount + " conflict(s))" : "")
+          + " · Focus through: " + (root.hostWidget ? root.hostWidget.fallthroughStatus : "unavailable")
+        color: Util.alpha(root.contentForeground, 0.55)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
       }
 
       Text {
@@ -323,7 +449,7 @@ Panel {
           bordered: true
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
-          onClicked: root.setSpecialFallthrough(!on)
+          onClicked: root.requestSpecialFallthrough(!on)
         }
         Button {
           property bool on: root.setting("showIcon", true) === true
@@ -337,6 +463,34 @@ Panel {
           fontFamily: root.contentFontFamily
           onClicked: root.persistSettings({ showIcon: !on })
         }
+      }
+
+      ConfirmDialog {
+        id: confirmDialog
+        anchors.fill: parent
+        z: 20
+        opened: root.confirming
+        focus: root.confirming
+        selectedIndex: 0
+        message: root.confirmMessage
+        confirmText: root.confirmAction
+        foreground: root.contentForeground
+        fontFamily: root.contentFontFamily
+        Keys.onPressed: function(event) {
+          if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)
+              && event.isAutoRepeat) {
+            event.accepted = true
+            return
+          }
+          if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+              && Date.now() - root.confirmOpenedAt < 300) {
+            event.accepted = true
+            return
+          }
+          event.accepted = confirmDialog.handleKey(event)
+        }
+        onCanceled: root.cancelConfirmation()
+        onConfirmed: root.acceptConfirmation()
       }
     }
   }

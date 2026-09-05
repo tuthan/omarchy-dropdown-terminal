@@ -3,28 +3,136 @@
 set -u
 
 config="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua"
+config_dir="$(dirname -- "$config")"
 line='hl.bind("CTRL + GRAVE", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))'
+begin_marker="-- BEGIN Dropdown Terminal binding"
+end_marker="-- END Dropdown Terminal binding"
 
-mkdir -p "$(dirname "$config")"
+status_json() {
+  local installed=false conflicts='[]'
+  [[ -f "$config" ]] && grep -Fqx -- "$line" "$config" && installed=true
+  if [[ -f "$config" ]]; then
+    conflicts="$(jq -Rn --arg generated "$line" '
+      [inputs]
+      | to_entries
+      | map(select(.value != $generated
+        and ((.value | test("^[[:space:]]*--")) | not)
+        and (.value | test("ctrl[[:space:]]*(\\+|,)[[:space:]]*(grave|code:41)"; "i"))))
+      | map({lineNumber: (.key + 1), text: .value})' < "$config" 2>/dev/null || printf '[]')"
+  fi
+  jq -cn --arg config "$config" --arg line "$line" --argjson installed "$installed" \
+    --argjson conflicts "$conflicts" \
+    '{version: 1, available: true, supported: true, installed: $installed,
+      config: $config, line: $line, conflicts: $conflicts,
+      conflictCount: ($conflicts | length)}'
+}
 
-# Do not add a duplicate if the user already installed this action manually.
-if [[ -f "$config" ]] && grep -Fq 'io.github.tuthan.dropdown-terminal:toggle' "$config"; then
-  notify-send "Dropdown Terminal" "Ctrl + Grave is already bound" >/dev/null 2>&1 || true
-  exit 0
-fi
+check_config_errors() {
+  local errors
+  errors="$(hyprctl configerrors -j 2>/dev/null)" || return 0
+  jq -e 'type == "array" and length > 0' <<<"$errors" >/dev/null 2>&1 && return 1
+  return 0
+}
 
-if [[ -f "$config" ]]; then
-  backup="$config.bak.$(date +%Y%m%d%H%M%S)"
-  cp -p "$config" "$backup"
-fi
+rewrite_config() {
+  local action="$1" temp mode="644"
+  mkdir -p "$config_dir" || return 1
+  [[ -f "$config" ]] && mode="$(stat -c '%a' "$config" 2>/dev/null || printf '644')"
+  temp="$(mktemp "$config_dir/.bindings.lua.dropdown-terminal.XXXXXX")" || return 1
 
-{
-  printf '\n-- Dropdown Terminal\n'
-  printf '%s\n' "$line"
-} >> "$config"
+  if [[ -f "$config" ]]; then
+    awk -v begin="$begin_marker" -v end="$end_marker" -v line="$line" \
+      -v remove_line="$([[ "$action" == "remove" ]] && printf 1 || printf 0)" '
+      $0 == begin { skipping = 1; next }
+      $0 == end { skipping = 0; next }
+      skipping { next }
+      $0 == line && remove_line { next }
+      { print }
+    ' "$config" > "$temp"
+  fi
 
-if hyprctl reload >/dev/null 2>&1; then
-  notify-send "Dropdown Terminal" "Bound Ctrl + Grave" >/dev/null 2>&1 || true
-else
-  notify-send "Dropdown Terminal" "Binding saved; reload Hyprland manually" >/dev/null 2>&1 || true
-fi
+  if [[ "$action" == "install" ]]; then
+    printf '\n%s\n%s\n%s\n' "$begin_marker" "$line" "$end_marker" >> "$temp"
+  fi
+
+  chmod "$mode" "$temp" 2>/dev/null || true
+  if [[ -f "$config" ]]; then
+    backup="$config.bak.$(date +%Y%m%d%H%M%S)"
+    cp -p "$config" "$backup" || { rm -f "$temp"; return 1; }
+  fi
+  if ! mv -f "$temp" "$config"; then
+    rm -f "$temp"
+    return 1
+  fi
+  if ! hyprctl reload >/dev/null 2>&1; then
+    notify-send "Dropdown Terminal" "Binding saved; reload Hyprland manually" >/dev/null 2>&1 || true
+    return 1
+  fi
+  if ! check_config_errors; then
+    notify-send "Dropdown Terminal" "Hyprland reported a binding config error" >/dev/null 2>&1 || true
+    return 1
+  fi
+}
+
+managed_block_present() {
+  local expected actual
+  [[ -f "$config" ]] || return 1
+  expected="$(printf '%s\n%s\n%s\n' "$begin_marker" "$line" "$end_marker")"
+  actual="$(awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { block = $0 ORS; inside = 1; next }
+    inside {
+      block = block $0 ORS
+      if ($0 == end) { print block; exit }
+    }
+  ' "$config")"
+  [[ "$actual" == "$expected" ]]
+}
+
+conflicts_present() {
+  local report
+  report="$(status_json)" || return 1
+  jq -e '.conflictCount > 0' <<<"$report" >/dev/null 2>&1
+}
+
+acquire_mutation_lock() {
+  mkdir -p "$config_dir" || return 1
+  if ! exec 8>"$config_dir/.bindings.lua.dropdown-terminal.lock" 2>/dev/null; then
+    return 1
+  fi
+  flock -w 3 8
+}
+
+action="${1:-install}"
+case "$action" in
+  status)
+  status_json
+  ;;
+  install|install-force)
+    acquire_mutation_lock || exit 1
+    if [[ -f "$config" ]] && grep -Fqx -- "$line" "$config"; then
+      notify-send "Dropdown Terminal" "Ctrl + Grave is already bound" >/dev/null 2>&1 || true
+      exit 0
+    fi
+    if [[ "$action" == "install" ]] && conflicts_present; then
+      notify-send "Dropdown Terminal" "Ctrl + Grave is already used; review the conflict before installing" >/dev/null 2>&1 || true
+      exit 1
+    fi
+    rewrite_config install || exit 1
+    notify-send "Dropdown Terminal" "Bound Ctrl + Grave" >/dev/null 2>&1 || true
+    ;;
+  remove)
+    if [[ ! -f "$config" ]] || ! grep -Fq -- 'io.github.tuthan.dropdown-terminal:toggle' "$config"; then
+      exit 0
+    fi
+    acquire_mutation_lock || exit 1
+    if [[ ! -f "$config" ]] || ! grep -Fq -- 'io.github.tuthan.dropdown-terminal:toggle' "$config"; then
+      exit 0
+    fi
+    rewrite_config remove || exit 1
+    notify-send "Dropdown Terminal" "Removed the Dropdown Terminal binding" >/dev/null 2>&1 || true
+    ;;
+  *)
+    printf 'Dropdown Terminal: unknown action: %s\n' "$action" >&2
+    exit 2
+    ;;
+esac

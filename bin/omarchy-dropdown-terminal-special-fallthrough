@@ -1,28 +1,90 @@
 #!/usr/bin/env bash
 
-set -eu
+set -u
 
 action="${1:-}"
-[[ "$action" == "enable" || "$action" == "disable" ]] || exit 2
-
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
 config_file="$config_dir/input.lua"
 begin_marker="-- BEGIN Dropdown Terminal special fallthrough"
 end_marker="-- END Dropdown Terminal special fallthrough"
 
-if [[ "$action" == "disable" ]] && { [[ ! -f "$config_file" ]] || ! grep -Fxq -- "$begin_marker" "$config_file"; }; then
+status_json() {
+  local installed=false
+  managed_block_present && installed=true
+  jq -cn --arg config "$config_file" --arg begin "$begin_marker" --arg end "$end_marker" \
+    --argjson installed "$installed" \
+    '{version: 1, available: true, supported: true, installed: $installed, config: $config, begin: $begin, end: $end}'
+}
+
+expected_block() {
+  printf '%s\nhl.config({\n  input = {\n    special_fallthrough = true,\n  },\n})\n%s\n' \
+    "$begin_marker" "$end_marker"
+}
+
+managed_block_present() {
+  local expected actual
+  [[ -f "$config_file" ]] || return 1
+  expected="$(expected_block)"
+  actual="$(awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { block = $0 ORS; inside = 1; next }
+    inside {
+      block = block $0 ORS
+      if ($0 == end) { print block; exit }
+    }
+  ' "$config_file")"
+  [[ "$actual" == "$expected" ]]
+}
+
+check_config_errors() {
+  local errors
+  errors="$(hyprctl configerrors -j 2>/dev/null)" || return 0
+  jq -e 'type == "array" and length > 0' <<<"$errors" >/dev/null 2>&1 && return 1
+  return 0
+}
+
+case "$action" in
+  status)
+    status_json
+    exit 0
+    ;;
+  enable|disable)
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+
+# Avoid touching the file, creating a backup, or reloading Hyprland when the
+# requested state is already present. This is important because every bar
+# instance may request the persisted setting during startup.
+if [[ "$action" == "enable" ]] && managed_block_present; then
+  exit 0
+fi
+if [[ "$action" == "disable" ]] && ! managed_block_present; then
   exit 0
 fi
 
-mkdir -p "$config_dir"
-mode="644"
-[[ -f "$config_file" ]] && mode="$(stat -c '%a' "$config_file")"
-temp_file="$(mktemp "$config_dir/.input.lua.dropdown-terminal.XXXXXX")"
+mkdir -p "$config_dir" || exit 1
+lock_file="$config_dir/.input.lua.dropdown-terminal.lock"
+if ! exec 8>"$lock_file" 2>/dev/null; then
+  exit 1
+fi
+if ! flock -w 3 8; then
+  exit 1
+fi
 
-cleanup() {
-  rm -f "$temp_file"
-}
-trap cleanup EXIT
+# Re-check after waiting: another service instance may have completed the
+# exact mutation while this one was blocked on the file lock.
+if [[ "$action" == "enable" ]] && managed_block_present; then
+  exit 0
+fi
+if [[ "$action" == "disable" ]] && ! managed_block_present; then
+  exit 0
+fi
+
+mode="644"
+[[ -f "$config_file" ]] && mode="$(stat -c '%a' "$config_file" 2>/dev/null || printf '644')"
+temp_file="$(mktemp "$config_dir/.input.lua.dropdown-terminal.XXXXXX")" || exit 1
 
 if [[ -f "$config_file" ]]; then
   awk -v begin="$begin_marker" -v end="$end_marker" '
@@ -33,15 +95,23 @@ if [[ -f "$config_file" ]]; then
 fi
 
 if [[ "$action" == "enable" ]]; then
-  printf '\n%s\nhl.config({\n  input = {\n    special_fallthrough = true,\n  },\n})\n%s\n' \
-    "$begin_marker" "$end_marker" >> "$temp_file"
+  expected_block >> "$temp_file"
 fi
 
-chmod "$mode" "$temp_file"
-mv "$temp_file" "$config_file"
-trap - EXIT
-
-# A missing compositor socket must not leave the settings panel's process
-# running indefinitely. The next Hyprland reload will still pick up the file.
-timeout 2s hyprctl reload >/dev/null 2>&1 || true
-timeout 2s hyprctl configerrors >/dev/null 2>&1 || true
+chmod "$mode" "$temp_file" 2>/dev/null || true
+if [[ -f "$config_file" ]]; then
+  backup="$config_file.bak.$(date +%Y%m%d%H%M%S)"
+  cp -p "$config_file" "$backup" || { rm -f "$temp_file"; exit 1; }
+fi
+if ! mv -f "$temp_file" "$config_file"; then
+  rm -f "$temp_file"
+  exit 1
+fi
+if ! hyprctl reload >/dev/null 2>&1; then
+  notify-send "Dropdown Terminal" "Input setting saved; reload Hyprland manually" >/dev/null 2>&1 || true
+  exit 1
+fi
+if ! check_config_errors; then
+  notify-send "Dropdown Terminal" "Hyprland reported an input config error" >/dev/null 2>&1 || true
+  exit 1
+fi

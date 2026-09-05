@@ -1,0 +1,32 @@
+[
+  {
+    "address": "0x1000",
+    "pid": 1000,
+    "at": [200, 100],
+    "size": [1600, 700],
+    "floating": true,
+    "monitor": 0,
+    "workspace": {"id": 1, "name": "special:dropdown-terminal"},
+    "title": "Existing terminal"
+  },
+  {
+    "address": "0x2000",
+    "pid": 9001,
+    "at": [0, 0],
+    "size": [900, 700],
+    "floating": false,
+    "monitor": 0,
+    "workspace": {"id": 2, "name": "2"},
+    "title": "Unrelated window opened concurrently"
+  },
+  {
+    "address": "0x3000",
+    "pid": 4242,
+    "at": [0, 0],
+    "size": [1200, 800],
+    "floating": false,
+    "monitor": 0,
+    "workspace": {"id": 3, "name": "3"},
+    "title": "Launched terminal"
+  }
+]

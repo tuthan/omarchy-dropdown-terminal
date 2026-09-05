@@ -1,0 +1,13 @@
+[
+  {
+    "id": 0,
+    "name": "DP-1",
+    "x": 0,
+    "y": 0,
+    "width": 3440,
+    "height": 1440,
+    "scale": 1,
+    "focused": true,
+    "specialWorkspace": {"name": "special:dropdown-terminal"}
+  }
+]

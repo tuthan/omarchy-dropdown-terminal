@@ -37,6 +37,18 @@ Omarchy. After making source changes, rerun the `rsync` command and
 
 The helper requires `jq`, `hyprctl`, and the Omarchy `omarchy` command.
 
+## Design and implementation rules
+
+New work follows the reusable
+[General Omarchy plugin design rules](../plugin-docs/rules/omarchy-plugin-design.md)
+through this repository's [design-rule profile](docs/design-rules.md) and
+[phase plan](docs/plan/README.md).
+
+The profile makes truthful state, explicit/reversible external config edits,
+native Omarchy UI tokens, theme ownership, bounded motion, reduced motion, and
+input safety part of each phase's acceptance gate. Phase 0 closes the original
+settings-reload, mutation-confirmation, and stacked-monitor parking gaps.
+
 ## Update
 
 For a plugin installed from GitHub, update it with:
@@ -81,9 +93,11 @@ hl.bind("CTRL + code:41", hl.dsp.global("io.github.tuthan.dropdown-terminal:togg
 ```
 
 The bar icon also provides shortcuts: left-click it to toggle the terminal,
-middle-click it to open the settings panel, or right-click it to add the default
-`Ctrl + Grave` binding. If the binding is not already present, the plugin backs up
-`bindings.lua`, appends the line, and reloads Hyprland.
+middle-click it to open the settings panel, or right-click it to review the
+default `Ctrl + Grave` binding. The cancel-first preflight names the exact
+chord, target, effect, backup, and removal path, and lists any existing
+`Ctrl + Grave` conflicts before offering an explicit “Add anyway” action; only
+confirmation performs the atomic edit and Hyprland reload.
 
 ## Configuration
 
@@ -212,9 +226,9 @@ animation is used instead.
   synchronous compositor call as the reveal. Hyprland re-centers a floating
   window whenever its special workspace is revealed, and rejects any position
   whose center falls outside the monitor, so the park cannot be done ahead of
-  time. All geometry is anchored to the focused monitor's global origin, and
-  the on-screen check tests overlap against every connected monitor, so
-  vertically stacked monitor arrangements are classified correctly.
+  time. Geometry is anchored to the relevant monitor's global origin, and the
+  on-screen check uses the window's owner monitor so a vertically stacked
+  neighbour cannot misclassify a parked rectangle.
 - Existing dropdown windows are detected after a shell restart, so they are
   reused instead of duplicated.
 - Runtime state is stored in `XDG_RUNTIME_DIR` when it is private; if that is
