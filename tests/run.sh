@@ -81,6 +81,8 @@ assert_status "QML iterates toplevel object-model values" grep -Fq 'Hyprland.top
 assert_status "QML iterates monitor object-model values" grep -Fq 'Hyprland.monitors.values' "$root_dir/Service.qml"
 assert_status "QML returns the toplevel monitor object" grep -Fq 'return toplevel && toplevel.monitor ? toplevel.monitor : null' "$root_dir/Service.qml"
 assert_status "QML normalizes raw closewindow addresses" grep -Fq 'root.normalizedAddress(closed) === root.normalizedAddress(root.trackedAddress)' "$root_dir/Service.qml"
+assert_status "QML reconciles tracked closewindow events" grep -Fq 'root.requestCloseReconcile()' "$root_dir/Service.qml"
+assert_status "QML resolves the helper state root" grep -Fq '"state-root"' "$root_dir/Service.qml"
 assert_status "binding preflight waits for fresh status" grep -Fq 'readonly property bool bindingStatusReady' "$root_dir/BarWidget.qml"
 assert_status "phase 1 overlay is lazy on Off" grep -Fq 'active: service.entranceEffect !== "Off"' "$root_dir/BarWidget.qml"
 assert_status "phase 1 overlay is click-through" grep -Fq 'mask: Region {}' "$root_dir/TerminalEffects.qml"
@@ -98,6 +100,25 @@ assert_status "phase 1 preserves zero corner radius" grep -Fq 'isFinite(queried)
 assert_status "phase 1 scales core opacity by intensity" grep -Fq 'fadeProgress * intensity *' "$root_dir/TerminalEffects.qml"
 assert_status "phase 1 scales halo opacity by intensity" grep -Fq 'readonly property real haloOpacity: fadeProgress * intensity *' "$root_dir/TerminalEffects.qml"
 assert_status "phase 1 allows zero emitted sparks" grep -Fq 'Math.round(intensity * 12)' "$root_dir/TerminalEffects.qml"
+assert_status "phase 2 has the urgency property" grep -Fq 'toplevel.urgent === true' "$root_dir/Service.qml"
+assert_status "phase 2 parses the append-only journal" grep -Fq 'eventIncompleteTail' "$root_dir/Service.qml"
+assert_status "phase 2 re-probes only while running" grep -Fq 'interval: 1000' "$root_dir/Service.qml"
+assert_status "phase 2 classifies from lifecycle order" grep -Fq 'root.eventTerminalState === "hidden"' "$root_dir/Service.qml"
+assert_status "phase 2 does not use current visibility for finish history" grep -Fq 'Historical hidden-at-finish' "$root_dir/Service.qml"
+assert_status "phase 2 uses distinct indicator states" grep -Eq 'return "(running|attention|succeeded|failed)"' "$root_dir/Service.qml"
+assert_status "phase 2 has all manifest settings" jq -e '.barWidget.schema as $schema | ["urgencyIndicator","commandTracking","commandNotifyAfterMs","commandFailureIndicator","commandCancelIsFailure"] | all(.[]; . as $key | any($schema[]; .key == $key))' "$root_dir/manifest.json"
+assert_status "phase 2 has the shell installer" test -x "$root_dir/bin/omarchy-dropdown-terminal-shell"
+assert_status "phase 2 has all shell adapters" test -f "$root_dir/shell/bash.yadtm" -a -f "$root_dir/shell/zsh.yadtm" -a -f "$root_dir/shell/fish.yadtm"
+assert_false "bash adapter does not capture command text" grep -Fq 'BASH_COMMAND' "$root_dir/shell/bash.yadtm"
+assert_false "bash adapter has no prompt-path external date" grep -Fq 'date ' "$root_dir/shell/bash.yadtm"
+assert_false "fish adapter has no prompt-path external date" grep -Fq 'date ' "$root_dir/shell/fish.yadtm"
+assert_status "installer captures Bash DEBUG trap before sourcing" grep -Fq 'YADTM_EXISTING_DEBUG_TRAP="$(trap -p DEBUG' "$root_dir/bin/omarchy-dropdown-terminal-shell"
+assert_status "Bash adapter requires the rc-level trap capture" grep -Fq 'YADTM_EXISTING_DEBUG_TRAP_CAPTURED' "$root_dir/shell/bash.yadtm"
+assert_status "Bash session includes its shell PID" grep -Fq 'YADTM_TERMINAL_SESSION:-bash}-bash-${BASHPID:-$$}' "$root_dir/shell/bash.yadtm"
+assert_status "Zsh session includes its shell PID" grep -Fq 'YADTM_TERMINAL_SESSION:-zsh}-zsh-$$' "$root_dir/shell/zsh.yadtm"
+assert_status "all adapters include their shell PID in sessions" grep -Fq 'YADTM_TERMINAL_SESSION-fish-$fish_pid' "$root_dir/shell/fish.yadtm"
+assert_status "helper has scoped terminal environment" grep -Fq 'YADTM_COMMAND_EVENTS="$event_file"' "$root_dir/bin/omarchy-dropdown-terminal"
+assert_status "helper records lifecycle only through a short schema" grep -Fq "v1\\t%s\\thelper" "$root_dir/bin/omarchy-dropdown-terminal"
 
 rm -f "$state_file" "$legacy_address_file"
 write_state 0x1000 0x1000
@@ -140,12 +161,18 @@ assert_eq "launch rejects unrelated concurrent window" "" \
 rm -f "$launch_file"
 write_launch_marker "0x1000" 4242 $'4242\n7777'
 assert_status "launch marker stores process lineage" jq -e '.launcherPid == 4242 and .launcherPids == ["4242", "7777"] and .before == ["0x1000"]' "$launch_file"
+launch_now="$(date +%s)"
+jq --argjson now "$launch_now" '.startedAt = $now' "$launch_file" > "$runtime_dir/fresh-launch.json"
+mv "$runtime_dir/fresh-launch.json" "$launch_file"
+pending_launch_before
+assert_false "fresh launch marker is not stale" launch_marker_stale
+assert_eq "fresh launch marker remains adoptable" "0x1000" "$pending_before"
+assert_eq "fresh marker restores launcher PID" "4242" "$launch_pid"
+assert_eq "fresh marker restores observed PIDs" $'4242\n7777' "$launch_pids"
 jq '.startedAt = 0' "$launch_file" > "$runtime_dir/old-launch.json"
 mv "$runtime_dir/old-launch.json" "$launch_file"
 pending_launch_before
-assert_eq "late launch marker remains adoptable" "0x1000" "$pending_before"
-assert_eq "late marker restores launcher PID" "4242" "$launch_pid"
-assert_eq "late marker restores observed PIDs" $'4242\n7777' "$launch_pids"
+assert_status "expired launch marker is recognized" launch_marker_stale
 
 fixture_clients="$fixture_dir/clients-stacked-parked.json"
 fixture_monitors="$fixture_dir/monitors-stacked.json"
@@ -198,6 +225,104 @@ assert_false "binding install refuses silent conflict" env XDG_CONFIG_HOME="$con
 assert_false "conflict install does not append duplicate" grep -Fqx -- 'hl.bind("CTRL + GRAVE", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))' "$conflict_config_home/hypr/bindings.lua"
 XDG_CONFIG_HOME="$conflict_config_home" bash "$root_dir/bin/omarchy-dropdown-terminal-bind" install-force
 assert_status "explicit conflict confirmation can install" bash -c 'XDG_CONFIG_HOME="$1" bash "$2" status | jq -e ".installed == true and .conflictCount == 2"' _ "$conflict_config_home" "$root_dir/bin/omarchy-dropdown-terminal-bind"
+
+malformed_binding_home="$runtime_dir/malformed-binding"
+mkdir -p "$malformed_binding_home/hypr"
+printf '%s\n' \
+  '-- BEGIN Dropdown Terminal binding' \
+  'user_setting=kept' \
+  > "$malformed_binding_home/hypr/bindings.lua"
+malformed_binding_digest="$(sha256sum "$malformed_binding_home/hypr/bindings.lua")"
+assert_false "binding helper refuses malformed managed block" env XDG_CONFIG_HOME="$malformed_binding_home" bash "$root_dir/bin/omarchy-dropdown-terminal-bind" install
+assert_eq "malformed binding remains untouched" "$malformed_binding_digest" "$(sha256sum "$malformed_binding_home/hypr/bindings.lua")"
+
+malformed_fallthrough_home="$runtime_dir/malformed-fallthrough"
+mkdir -p "$malformed_fallthrough_home/hypr"
+printf '%s\n' \
+  '-- BEGIN Dropdown Terminal special fallthrough' \
+  'user_setting=kept' \
+  > "$malformed_fallthrough_home/hypr/input.lua"
+malformed_fallthrough_digest="$(sha256sum "$malformed_fallthrough_home/hypr/input.lua")"
+assert_false "fallthrough helper refuses malformed managed block" env XDG_CONFIG_HOME="$malformed_fallthrough_home" bash "$root_dir/bin/omarchy-dropdown-terminal-special-fallthrough" enable
+assert_eq "malformed fallthrough remains untouched" "$malformed_fallthrough_digest" "$(sha256sum "$malformed_fallthrough_home/hypr/input.lua")"
+
+# Phase 2 shell integration installer: use a private fake HOME and an installed
+# plugin copy so the guarded source path is real, just as it is after Omarchy
+# installs this plugin.
+shell_home="$runtime_dir/shell-home"
+shell_plugin="$shell_home/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal"
+mkdir -p "$shell_plugin/shell"
+cp "$root_dir"/shell/*.yadtm "$shell_plugin/shell/"
+printf '%s\n' 'user_setting=kept' > "$shell_home/.bashrc"
+shell_status="$(HOME="$shell_home" SHELL=/usr/bin/bash bash "$root_dir/bin/omarchy-dropdown-terminal-shell" status)"
+assert_status "shell status reports target and source" jq -e '.shell == "bash" and .installed == false and .sourceReadable == true' <<<"$shell_status"
+HOME="$shell_home" SHELL=/usr/bin/bash bash "$root_dir/bin/omarchy-dropdown-terminal-shell" install >/dev/null
+assert_status "shell install read-back" bash -c 'HOME="$1" SHELL=/usr/bin/bash bash "$2" status | jq -e ".installed == true"' _ "$shell_home" "$root_dir/bin/omarchy-dropdown-terminal-shell"
+assert_status "shell block is exact" grep -Fqx -- '# END Dropdown Terminal shell integration' "$shell_home/.bashrc"
+shell_backup_count="$(find "$shell_home" -maxdepth 1 -type f -name '.bashrc.bak.*' | wc -l)"
+shell_digest="$(sha256sum "$shell_home/.bashrc")"
+HOME="$shell_home" SHELL=/usr/bin/bash bash "$root_dir/bin/omarchy-dropdown-terminal-shell" install >/dev/null
+assert_eq "shell install is content-idempotent" "$shell_digest" "$(sha256sum "$shell_home/.bashrc")"
+assert_eq "shell install does not create another backup" "$shell_backup_count" "$(find "$shell_home" -maxdepth 1 -type f -name '.bashrc.bak.*' | wc -l)"
+printf '%s\n' 'unrelated=preserved' > "$shell_home/.zshrc"
+HOME="$shell_home" SHELL=/usr/bin/zsh bash "$root_dir/bin/omarchy-dropdown-terminal-shell" install zsh >/dev/null
+assert_status "zsh shell target" bash -c 'HOME="$1" SHELL=/usr/bin/zsh bash "$2" status zsh | jq -e ".shell == \"zsh\" and .installed == true"' _ "$shell_home" "$root_dir/bin/omarchy-dropdown-terminal-shell"
+fish_config_home="$shell_home/fish-config"
+mkdir -p "$fish_config_home/fish"
+HOME="$shell_home" XDG_CONFIG_HOME="$fish_config_home" SHELL=/usr/bin/fish bash "$root_dir/bin/omarchy-dropdown-terminal-shell" install fish >/dev/null
+assert_status "fish shell target" bash -c 'HOME="$1" XDG_CONFIG_HOME="$2" SHELL=/usr/bin/fish bash "$3" status fish | jq -e ".shell == \"fish\" and .installed == true"' _ "$shell_home" "$fish_config_home" "$root_dir/bin/omarchy-dropdown-terminal-shell"
+HOME="$shell_home" SHELL=/usr/bin/bash bash "$root_dir/bin/omarchy-dropdown-terminal-shell" remove >/dev/null
+assert_status "shell removal read-back" bash -c 'HOME="$1" SHELL=/usr/bin/bash bash "$2" status | jq -e ".installed == false"' _ "$shell_home" "$root_dir/bin/omarchy-dropdown-terminal-shell"
+assert_status "shell removal preserves unrelated content" grep -Fqx -- 'user_setting=kept' "$shell_home/.bashrc"
+assert_status "missing plugin source is silent" bash -c 'output="$(HOME="$1" bash --noprofile --rcfile "$1/.bashrc" -c true 2>&1)"; ! grep -Fq "No such file" <<<"$output"' _ "$shell_home"
+printf '%s\n' '# BEGIN Dropdown Terminal shell integration' 'user_content_after_unclosed_marker' >"$shell_home/.bashrc"
+malformed_digest="$(sha256sum "$shell_home/.bashrc")"
+assert_false "shell installer refuses unclosed marker" env HOME="$shell_home" SHELL=/usr/bin/bash bash "$root_dir/bin/omarchy-dropdown-terminal-shell" remove
+assert_eq "malformed marker is not destructively rewritten" "$malformed_digest" "$(sha256sum "$shell_home/.bashrc")"
+
+# Bash prompt-path contract: one start/end pair per foreground command, no
+# command text, and the status remains nonzero when a later prompt helper runs.
+hook_events="$runtime_dir/bash-events"
+hook_rc="$runtime_dir/bash-hook.rc"
+hook_output="$runtime_dir/bash-hook.out"
+cat > "$hook_rc" <<EOF
+PROMPT_COMMAND=(user_precmd)
+user_precmd() { :; }
+YADTM_EXISTING_DEBUG_TRAP="\$(trap -p DEBUG 2>/dev/null || true)"
+YADTM_EXISTING_DEBUG_TRAP_CAPTURED=1
+source "$root_dir/shell/bash.yadtm"
+unset YADTM_EXISTING_DEBUG_TRAP YADTM_EXISTING_DEBUG_TRAP_CAPTURED
+EOF
+printf 'sleep 0.02\nfalse\nexit\n' | HOME="$shell_home" YADTM_TERMINAL=1 YADTM_COMMAND_EVENTS="$hook_events" YADTM_TERMINAL_SESSION=phase2-test PS1=prompt SHELL=/usr/bin/bash bash --noprofile --rcfile "$hook_rc" -i >"$hook_output" 2>"$runtime_dir/bash-hook.err" || true
+assert_status "bash hook emits start and finish" test "$(awk -F '\t' '$2 == "start" { starts++ } $2 == "finish" { finishes++ } END { print starts ":" finishes }' "$hook_events")" = "3:2"
+assert_eq "bash hook preserves false status" "1" "$(awk -F '\t' '$2 == "finish" { print $6 }' "$hook_events" | tail -n 1)"
+assert_false "bash hook never writes command text" grep -Eq 'sleep|false' "$hook_events"
+assert_false "bash hook writes no prompt output" grep -Fq 'Dropdown Terminal' "$hook_output"
+
+debug_events="$runtime_dir/bash-debug-events"
+debug_rc="$runtime_dir/bash-debug.rc"
+debug_marker="$runtime_dir/bash-debug.marker"
+cat > "$debug_rc" <<EOF
+user_debug() { printf x >>"$debug_marker"; }
+trap 'user_debug' DEBUG
+YADTM_EXISTING_DEBUG_TRAP="\$(trap -p DEBUG 2>/dev/null || true)"
+YADTM_EXISTING_DEBUG_TRAP_CAPTURED=1
+source "$root_dir/shell/bash.yadtm"
+unset YADTM_EXISTING_DEBUG_TRAP YADTM_EXISTING_DEBUG_TRAP_CAPTURED
+: >"$debug_marker"
+printf 'after-source\n' >/dev/null
+EOF
+printf 'true\nexit\n' | HOME="$shell_home" YADTM_TERMINAL=1 YADTM_COMMAND_EVENTS="$debug_events" YADTM_TERMINAL_SESSION=debug-test PS1=prompt SHELL=/usr/bin/bash bash --noprofile --rcfile "$debug_rc" -i >"$runtime_dir/bash-debug.out" 2>"$runtime_dir/bash-debug.err" || true
+assert_status "bash hook preserves an existing DEBUG trap" test -s "$debug_marker"
+
+concurrent_events="$runtime_dir/concurrent-events"
+for concurrent_session in one two; do
+  (printf 'true\nexit\n' | env HOME="$shell_home" YADTM_TERMINAL=1 YADTM_COMMAND_EVENTS="$concurrent_events" YADTM_TERMINAL_SESSION=shared-launch PS1=prompt SHELL=/usr/bin/bash bash --noprofile --rcfile "$hook_rc" -i >/dev/null 2>"$runtime_dir/$concurrent_session.err" || true) &
+done
+wait
+assert_status "concurrent shell events remain complete lines" awk -F '\t' 'NF != 0 && NF != 5 && NF != 6 { bad=1 } END { exit bad }' "$concurrent_events"
+assert_eq "concurrent shell events are not lost" "4:2" "$(awk -F '\t' '$2 == "start" { starts++ } $2 == "finish" { finishes++ } END { print starts ":" finishes }' "$concurrent_events")"
+assert_eq "shared launch sessions include distinct shell PIDs" "2" "$(awk -F '\t' '$2 == "start" && !seen[$3]++ { sessions++ } END { print sessions }' "$concurrent_events")"
 
 if (( fail > 0 )); then
   printf '%d passed, %d failed\n' "$pass" "$fail" >&2

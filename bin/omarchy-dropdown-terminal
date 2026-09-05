@@ -18,7 +18,7 @@ die() {
 }
 
 action="${1:-toggle}"
-[[ "$action" == "toggle" || "$action" == "hide" || "$action" == "cleanup" || "$action" == "status" ]] || die "unknown action: $action"
+[[ "$action" == "toggle" || "$action" == "hide" || "$action" == "cleanup" || "$action" == "status" || "$action" == "state-root" ]] || die "unknown action: $action"
 
 window_width_percent="${2:-90}"
 window_height_percent="${3:-45}"
@@ -70,7 +70,9 @@ state_dir() {
   else
     old_umask="$(umask)"
     umask 077
-    mkdir "$dir" || die "could not create state directory: $dir"
+    if ! mkdir "$dir" 2>/dev/null; then
+      [[ -d "$dir" ]] || { umask "$old_umask"; die "could not create state directory: $dir"; }
+    fi
     umask "$old_umask"
   fi
 
@@ -85,8 +87,26 @@ legacy_address_file="$state_root/address"
 animation_file="$state_root/io.github.tuthan.dropdown-terminal.special-animation"
 legacy_animation_file="$state_root/special-animation"
 launch_file="$state_root/io.github.tuthan.dropdown-terminal.launch"
+event_file="$state_root/io.github.tuthan.dropdown-terminal.events"
 
 debug "action=$action"
+
+# Lifecycle events are written only after the corresponding compositor action
+# returns successfully. They are deliberately short, tab-separated facts:
+# command text never enters this journal, the state file, or debug output.
+record_lifecycle() {
+  local phase="$1" address="$2" transition_id timestamp
+  case "$phase" in
+    shown|hidden|closed) ;;
+    *) return 1 ;;
+  esac
+  is_client_address "$address" || return 1
+  transition_id="helper-${BASHPID:-$$}-${EPOCHREALTIME:-0}"
+  timestamp="${EPOCHREALTIME:-0}"
+  printf 'v1\t%s\thelper\t%s\t%s\t%s\n' "$phase" "$transition_id" "$timestamp" "$address" \
+    >>"$event_file" 2>/dev/null || return 1
+  debug "lifecycle phase=$phase"
+}
 
 hl_dispatch() {
   hyprctl eval "hl.dispatch($1)"
@@ -702,6 +722,7 @@ emit_status() {
 launch_pids=""
 launch_pid=""
 pending_before=""
+launch_marker_max_age=30
 
 collect_descendant_pids() {
   local parent="$1" child
@@ -805,9 +826,9 @@ pending_launch_before() {
     launch_started="$(jq -r '.startedAt // 0' "$launch_file" 2>/dev/null || true)"
     launch_pid="$(jq -r '.launcherPid // empty' "$launch_file" 2>/dev/null || true)"
     launch_pids="$(jq -r '.launcherPids[]? | strings' "$launch_file" 2>/dev/null || true)"
-    # There is intentionally no age cutoff. The marker is the durable link
-    # between the launcher process tree and a client that maps after this
-    # helper's initial polling window.
+    # The marker is the durable link between the launcher process tree and a
+    # client that maps after this helper's initial polling window. Its age is
+    # checked separately so a failed launch cannot wedge every future toggle.
     pending_before="$(jq -r '.before[]? | strings' "$launch_file" 2>/dev/null || true)"
     return 0
   fi
@@ -820,6 +841,14 @@ pending_launch_before() {
   launch_pid=""
   launch_pids=""
   pending_before="$(tail -n +2 "$launch_file" 2>/dev/null || true)"
+}
+
+launch_marker_stale() {
+  local now
+  # A malformed or missing timestamp cannot safely identify a delayed launch.
+  [[ "${launch_started:-}" =~ ^[0-9]+$ ]] || return 0
+  now="$(date +%s 2>/dev/null)" || return 1
+  (( now >= launch_started && now - launch_started > launch_marker_max_age ))
 }
 
 # Tests source this file to exercise the pure geometry, state, and escaping
@@ -843,6 +872,11 @@ focus_window() {
 # `status` is intentionally outside the lock and before repair. It is a
 # diagnostic snapshot, so it must neither wait for an animation nor restore
 # global compositor state as a side effect.
+if [[ "$action" == "state-root" ]]; then
+  printf '%s\n' "$state_root"
+  exit 0
+fi
+
 if [[ "$action" == "status" ]]; then
   emit_status
   exit 0
@@ -940,10 +974,12 @@ if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && clie
 
     special_visible || exit 0
     hide_window "$terminal_address"
+    transition_result=$?
+    (( transition_result == 0 )) && record_lifecycle hidden "$terminal_address" || true
     if [[ -n "${active_window:-}" ]]; then
       focus_window "$active_window"
     fi
-    exit $?
+    exit "$transition_result"
   fi
 
   # Summoned while shown on another monitor: bring it to the focused one,
@@ -958,7 +994,9 @@ if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && clie
       size_window "$terminal_address"
       move_window "$terminal_window" "$top_margin"
       focus_window "$terminal_window"
-      exit $?
+      transition_result=$?
+      (( transition_result == 0 )) && record_lifecycle shown "$terminal_address" || true
+      exit "$transition_result"
     fi
   fi
 
@@ -966,7 +1004,9 @@ if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && clie
   # client afterward: focusing a hidden special-workspace window can reveal it.
   if special_visible && window_on_screen "$terminal_address"; then
     hide_window "$terminal_address"
-    exit $?
+    transition_result=$?
+    (( transition_result == 0 )) && record_lifecycle hidden "$terminal_address" || true
+    exit "$transition_result"
   fi
 
   # Recover a workspace left visible with the window still parked off screen.
@@ -974,16 +1014,25 @@ if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && clie
     compute_geometry
     move_window "$terminal_window" "$top_margin"
     focus_window "$terminal_window"
-    exit $?
+    transition_result=$?
+    (( transition_result == 0 )) && record_lifecycle shown "$terminal_address" || true
+    exit "$transition_result"
   fi
 
   show_window "$terminal_address"
-  exit $?
+  transition_result=$?
+  (( transition_result == 0 )) && record_lifecycle shown "$terminal_address" || true
+  exit "$transition_result"
 fi
 
 # Focus reconciliation and auto-hide are no-ops until the terminal exists;
 # neither background action should create a terminal window.
 if [[ "$action" == "hide" || "$action" == "cleanup" ]]; then
+  # A missing managed client is a real closed transition when the state cache
+  # still identifies it. Publish it so replay clears old unread completions.
+  if is_client_address "$state_active"; then
+    record_lifecycle closed "$state_active" || true
+  fi
   exit 0
 fi
 
@@ -993,9 +1042,14 @@ launch_pid=""
 launch_pids=""
 if [[ -e "$launch_file" ]]; then
   if pending_launch_before; then
-    before_clients="$pending_before"
-    pending_launch=1
-    debug "launch marker=pending"
+    if launch_marker_stale; then
+      debug "launch marker=expired"
+      rm -f "$launch_file" 2>/dev/null || true
+    else
+      before_clients="$pending_before"
+      pending_launch=1
+      debug "launch marker=pending"
+    fi
   else
     # A malformed marker cannot provide a safe baseline or process lineage.
     rm -f "$launch_file" 2>/dev/null || true
@@ -1005,9 +1059,13 @@ fi
 if (( ! pending_launch )); then
   before_clients="$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)"
   # Launch through Omarchy so xdg-terminal-exec selects the configured
-  # emulator. 9>&- keeps the lock fd out of the launched terminal: it must
-  # outlive this script without holding the lock.
-  omarchy launch terminal >/dev/null 2>&1 9>&- &
+  # emulator. The environment is scoped to this launch only. 9>&- keeps the
+  # lock fd out of the launched terminal: it must outlive this script without
+  # holding the lock.
+  terminal_session="helper-${BASHPID:-$$}-${EPOCHREALTIME:-0}-${RANDOM}"
+  YADTM_TERMINAL=1 YADTM_COMMAND_EVENTS="$event_file" \
+    YADTM_TERMINAL_SESSION="$terminal_session" \
+    omarchy launch terminal >/dev/null 2>&1 9>&- &
   launch_pid="$!"
   launch_pids=""
   # Capture the complete launch lineage before polling. A compositor client is
@@ -1041,4 +1099,6 @@ move_window "$current_window" "$top_margin"
 hl_dispatch "hl.dsp.window.move({ workspace = \"special:$special_workspace\", follow = false, window = $current_window })" >/dev/null
 hyprctl eval "hl.dispatch(hl.dsp.window.set_prop({ window = $current_window, prop = \"opacity\", value = 1 }))" >/dev/null 2>&1 || true
 show_window "$current"
-exit $?
+transition_result=$?
+(( transition_result == 0 )) && record_lifecycle shown "$current" || true
+exit "$transition_result"

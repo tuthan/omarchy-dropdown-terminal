@@ -108,6 +108,44 @@
         "max": 100,
         "step": 10,
         "defaultValue": 50
+      },
+      {
+        "key": "urgencyIndicator",
+        "type": "boolean",
+        "label": "Urgency indicator",
+        "description": "Show a generic attention badge when the managed terminal raises compositor urgency.",
+        "defaultValue": true
+      },
+      {
+        "key": "commandTracking",
+        "type": "boolean",
+        "label": "Command tracking",
+        "description": "Read precise shell completion events after explicit shell integration is installed.",
+        "defaultValue": false
+      },
+      {
+        "key": "commandNotifyAfterMs",
+        "type": "integer",
+        "label": "Command notify threshold (milliseconds)",
+        "description": "Only commands at least this long produce a completion indicator.",
+        "min": 0,
+        "max": 60000,
+        "step": 500,
+        "defaultValue": 5000
+      },
+      {
+        "key": "commandFailureIndicator",
+        "type": "boolean",
+        "label": "Failure indicator",
+        "description": "Show nonzero command exits as failed.",
+        "defaultValue": true
+      },
+      {
+        "key": "commandCancelIsFailure",
+        "type": "boolean",
+        "label": "Treat Ctrl-C as failure",
+        "description": "Treat exit status 130 as a failed command instead of ignoring cancellation.",
+        "defaultValue": false
       }
     ]
   }

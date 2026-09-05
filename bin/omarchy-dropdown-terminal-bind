@@ -88,6 +88,25 @@ managed_block_present() {
   [[ "$actual" == "$expected" ]]
 }
 
+managed_structure_safe() {
+  [[ -f "$config" ]] || return 0
+  awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin {
+      if (inside) malformed = 1
+      begins++
+      inside = 1
+      next
+    }
+    $0 == end {
+      if (!inside) malformed = 1
+      ends++
+      inside = 0
+      next
+    }
+    END { exit (malformed || inside || begins > 1 || ends > 1) ? 1 : 0 }
+  ' "$config"
+}
+
 conflicts_present() {
   local report
   report="$(status_json)" || return 1
@@ -109,6 +128,7 @@ case "$action" in
   ;;
   install|install-force)
     acquire_mutation_lock || exit 1
+    managed_structure_safe || exit 1
     if [[ -f "$config" ]] && grep -Fqx -- "$line" "$config"; then
       notify-send "Dropdown Terminal" "Ctrl + Grave is already bound" >/dev/null 2>&1 || true
       exit 0
@@ -125,6 +145,7 @@ case "$action" in
       exit 0
     fi
     acquire_mutation_lock || exit 1
+    managed_structure_safe || exit 1
     if [[ ! -f "$config" ]] || ! grep -Fq -- 'io.github.tuthan.dropdown-terminal:toggle' "$config"; then
       exit 0
     fi

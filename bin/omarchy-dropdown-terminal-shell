@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+
+set -u
+
+# Explicit shell integration installer. It edits only the selected rc file and
+# only the marked block. The sourced adapter is guarded both by readability and
+# by YADTM_TERMINAL, so ordinary shells and an uninstalled plugin stay silent.
+
+integration_begin="# BEGIN Dropdown Terminal shell integration"
+integration_end="# END Dropdown Terminal shell integration"
+plugin_id="io.github.tuthan.dropdown-terminal"
+plugin_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+install_root="${HOME:-}/.config/omarchy/plugins/$plugin_id"
+
+die() {
+  printf 'Dropdown Terminal shell integration: %s\n' "$1" >&2
+  exit 1
+}
+
+selected_shell() {
+  local requested="${1:-}" shell
+  shell="${requested:-${YADTM_SHELL:-${SHELL:-bash}}}"
+  shell="${shell##*/}"
+  case "$shell" in
+    bash|zsh|fish) printf '%s\n' "$shell" ;;
+    "") printf 'bash\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+shell_name="$(selected_shell "${2:-}")" || die "unsupported shell: ${2:-${SHELL:-unknown}}"
+
+case "$shell_name" in
+  bash)
+    config_file="${HOME:-}/.bashrc"
+    adapter_file="$plugin_root/shell/bash.yadtm"
+    source_path="$install_root/shell/bash.yadtm"
+    guarded_source='YADTM_EXISTING_DEBUG_TRAP="$(trap -p DEBUG 2>/dev/null || true)"
+YADTM_EXISTING_DEBUG_TRAP_CAPTURED=1
+[[ -r "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/bash.yadtm" ]] \
+  && source "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/bash.yadtm"
+unset YADTM_EXISTING_DEBUG_TRAP YADTM_EXISTING_DEBUG_TRAP_CAPTURED'
+    ;;
+  zsh)
+    config_file="${HOME:-}/.zshrc"
+    adapter_file="$plugin_root/shell/zsh.yadtm"
+    source_path="$install_root/shell/zsh.yadtm"
+    guarded_source='[[ -r "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/zsh.yadtm" ]] \
+  && source "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/zsh.yadtm"'
+    ;;
+  fish)
+    config_file="${XDG_CONFIG_HOME:-${HOME:-}/.config}/fish/config.fish"
+    adapter_file="$plugin_root/shell/fish.yadtm"
+    source_path="$install_root/shell/fish.yadtm"
+    guarded_source='test -r "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/fish.yadtm"; and source "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/fish.yadtm"'
+    ;;
+esac
+
+expected_block() {
+  printf '%s\n%s\n%s\n' "$integration_begin" "$guarded_source" "$integration_end"
+}
+
+managed_block() {
+  local actual=""
+  [[ -f "$config_file" ]] || return 1
+  actual="$(awk -v begin="$integration_begin" -v end="$integration_end" '
+    $0 == begin { block = $0 ORS; inside = 1; next }
+    inside {
+      block = block $0 ORS
+      if ($0 == end) { printf "%s", block; exit }
+    }
+  ' "$config_file")"
+  printf '%s' "$actual"
+}
+
+managed_block_present() {
+  local expected actual
+  expected="$(expected_block)"
+  actual="$(managed_block || true)"
+  [[ -n "$actual" && "$actual" == "$expected" ]]
+}
+
+marker_present() {
+  [[ -f "$config_file" ]] && grep -Fqx -- "$integration_begin" "$config_file"
+}
+
+managed_structure_safe() {
+  [[ -f "$config_file" ]] || return 0
+  awk -v begin="$integration_begin" -v end="$integration_end" '
+    $0 == begin { begins++; inside = 1; next }
+    inside && $0 == end { ends++; inside = 0; next }
+    END {
+      # An unclosed marker would make a tail-removal ambiguous. Refuse it
+      # rather than deleting unrelated user rc content.
+      exit (inside || begins > 1 || ends > 1) ? 1 : 0
+    }
+  ' "$config_file"
+}
+
+status_json() {
+  local installed=false source_readable=false block=""
+  managed_block_present && installed=true
+  [[ -r "$source_path" ]] && source_readable=true
+  block="$(expected_block)"
+  jq -cn --arg shell "$shell_name" --arg config "$config_file" \
+    --arg source "$source_path" --arg begin "$integration_begin" \
+    --arg end "$integration_end" --arg block "$block" \
+    --argjson installed "$installed" --argjson sourceReadable "$source_readable" \
+    '{version: 1, available: true, supported: true, shell: $shell,
+      config: $config, source: $source, sourceReadable: $sourceReadable,
+      installed: $installed, begin: $begin, end: $end, block: $block}'
+}
+
+acquire_lock() {
+  local config_dir
+  config_dir="$(dirname -- "$config_file")"
+  mkdir -p "$config_dir" || return 1
+  exec 8>"$config_dir/.dropdown-terminal-shell.lock" 2>/dev/null || return 1
+  flock -w 3 8
+}
+
+backup_file() {
+  local stamp backup suffix=0
+  [[ -f "$config_file" ]] || return 0
+  stamp="$(date +%Y%m%d%H%M%S)" || return 1
+  backup="$config_file.bak.$stamp"
+  while [[ -e "$backup" ]]; do
+    suffix=$((suffix + 1))
+    backup="$config_file.bak.$stamp.$suffix"
+  done
+  cp -p -- "$config_file" "$backup"
+}
+
+rewrite_config() {
+  local action="$1" config_dir temp mode="644"
+  config_dir="$(dirname -- "$config_file")"
+  mkdir -p "$config_dir" || return 1
+  [[ -f "$config_file" ]] && mode="$(stat -c '%a' "$config_file" 2>/dev/null || printf '644')"
+  temp="$(mktemp "$config_dir/.dropdown-terminal-shell.XXXXXX")" || return 1
+
+  if [[ -f "$config_file" ]]; then
+    awk -v begin="$integration_begin" -v end="$integration_end" '
+      $0 == begin { inside = 1; next }
+      inside && $0 == end { inside = 0; next }
+      !inside { print }
+    ' "$config_file" >"$temp" || { rm -f -- "$temp"; return 1; }
+  fi
+  if [[ "$action" == install ]]; then
+    printf '\n%s\n' "$(expected_block)" >>"$temp" || { rm -f -- "$temp"; return 1; }
+  fi
+  chmod "$mode" "$temp" 2>/dev/null || true
+  backup_file || { rm -f -- "$temp"; return 1; }
+  mv -f -- "$temp" "$config_file" || { rm -f -- "$temp"; return 1; }
+}
+
+action="${1:-status}"
+case "$action" in
+  status)
+    status_json
+    ;;
+  install|remove)
+    [[ -r "$adapter_file" && -r "$source_path" ]] || die "adapter file is not readable at the installed plugin path: $source_path"
+    acquire_lock || die "could not acquire rc-file lock"
+    managed_structure_safe || die "refusing to edit a malformed managed block in $config_file"
+    if [[ "$action" == install ]]; then
+      managed_block_present && { status_json; exit 0; }
+      rewrite_config install || die "could not update $config_file"
+      managed_block_present || die "install completed without an exact read-back"
+    else
+      managed_block_present || { status_json; exit 0; }
+      rewrite_config remove || die "could not update $config_file"
+      ! managed_block_present || die "remove completed without an exact read-back"
+    fi
+    status_json
+    ;;
+  *)
+    die "unknown action: $action"
+    ;;
+esac

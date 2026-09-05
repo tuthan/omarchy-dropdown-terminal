@@ -1,0 +1,36 @@
+# Dropdown Terminal command tracking for Fish.
+
+status is-interactive; or return 0
+set -q YADTM_TERMINAL; or return 0
+test "$YADTM_TERMINAL" = 1; or return 0
+set -q YADTM_COMMAND_EVENTS; or return 0
+test -n "$YADTM_COMMAND_EVENTS"; or return 0
+set -q _yadtm_fish_loaded; and return 0
+
+set -g _yadtm_fish_loaded 1
+if set -q YADTM_TERMINAL_SESSION
+    set -g _yadtm_session "$YADTM_TERMINAL_SESSION-fish-$fish_pid"
+else
+    set -g _yadtm_session "fish-$fish_pid"
+end
+set -g _yadtm_seq 0
+set -g _yadtm_started 0
+set -g _yadtm_active_seq 0
+
+function _yadtm_fish_preexec --on-event fish_preexec
+    test $_yadtm_started -eq 0; or return 0
+    set -g _yadtm_seq (math $_yadtm_seq + 1)
+    set -g _yadtm_active_seq $_yadtm_seq
+    set -g _yadtm_started 1
+    # Fish exposes the command duration in fish_postexec but has no portable
+    # clock builtin. The zero timestamps are paired with the final field below
+    # so the reducer can use Fish's builtin CMD_DURATION without spawning date.
+    printf 'v1\tstart\t%s\t%s\t0\n' "$_yadtm_session" "$_yadtm_active_seq" >>"$YADTM_COMMAND_EVENTS" 2>/dev/null; or true
+end
+
+function _yadtm_fish_postexec --on-event fish_postexec
+    set -l _yadtm_status $status
+    test $_yadtm_started -eq 1; or return 0
+    set -g _yadtm_started 0
+    printf 'v1\tfinish\t%s\t%s\t0\t%s\t%s\n' "$_yadtm_session" "$_yadtm_active_seq" "$_yadtm_status" "$CMD_DURATION" >>"$YADTM_COMMAND_EVENTS" 2>/dev/null; or true
+end

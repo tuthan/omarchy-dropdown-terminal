@@ -15,6 +15,36 @@ BarWidget {
 
   readonly property bool showIcon: setting("showIcon", true) === true
   readonly property string icon: String(setting("icon", "\uF120"))
+  readonly property string indicatorGlyph: {
+    if (service.indicatorState === "running") return "◌"
+    if (service.indicatorState === "attention") return "!"
+    if (service.indicatorState === "succeeded") return "✓"
+    if (service.indicatorState === "failed") return "×"
+    return root.icon
+  }
+  readonly property color indicatorColor: {
+    if (service.indicatorState === "attention" || service.indicatorState === "failed")
+      return root.bar ? root.bar.urgent : Color.urgent
+    if (service.indicatorState === "running")
+      return Color.muted
+    if (service.indicatorState === "succeeded")
+      return Color.accent
+    return root.bar ? root.bar.barForeground : Color.foreground
+  }
+  readonly property string indicatorTooltip: {
+    if (service.indicatorState === "running") return "running · Dropdown Terminal command in progress"
+    if (service.indicatorState === "attention")
+      return "attention · Terminal needs attention (generic urgency; command status unavailable)"
+    if (service.indicatorState === "succeeded")
+      return "succeeded · command finished while hidden"
+        + (service.commandUnreadCount > 1 ? " (" + service.commandUnreadCount + " unread)" : "")
+    if (service.indicatorState === "failed")
+      return "failed · command finished with a nonzero status while hidden"
+        + (service.commandUnreadCount > 1 ? " (" + service.commandUnreadCount + " unread)" : "")
+    if (service.commandTracking && !service.commandIntegrationInstalled)
+      return "Dropdown Terminal · command tracking not configured; urgency remains available"
+    return "Left-click: terminal · Middle-click: settings · Right-click: bind Ctrl + Grave"
+  }
 
   visible: !vertical && showIcon
   implicitWidth: showIcon ? button.implicitWidth : 0
@@ -71,10 +101,26 @@ BarWidget {
     service.refreshMutationStatus()
   }
 
+  function refreshShellIntegrationStatus() {
+    service.refreshShellIntegrationStatus()
+  }
+
+  function installShellIntegration() {
+    service.mutateShellIntegration("install")
+  }
+
+  function removeShellIntegration() {
+    service.mutateShellIntegration("remove")
+  }
+
   readonly property string bindingStatus: service.bindingStatus
   readonly property var bindingConflicts: service.bindingConflicts
   readonly property bool bindingStatusReady: service.bindingStatusReady
   readonly property string fallthroughStatus: service.fallthroughStatus
+  readonly property string shellStatus: service.shellStatus
+  readonly property var shellStatusReport: service.shellStatusReport
+  readonly property bool shellStatusReady: service.shellStatusReady
+  readonly property string shellActionMessage: service.shellActionMessage
 
   // BarWidget is instantiated once per output by Omarchy. The loader keeps
   // the Off path genuinely absent: no PanelWindow, particle system, timers,
@@ -105,11 +151,43 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.icon
+    text: ""
     slotSize: Style.bar.statusSlot
-    tooltipText: service.launching
-      ? "Opening terminal…"
-      : "Left-click: terminal · Middle-click: settings · Right-click: bind Ctrl + Grave"
+    iconComponent: Component {
+      Item {
+        OpticalGlyph {
+          anchors.fill: parent
+          text: root.indicatorGlyph
+          color: root.indicatorColor
+          fontFamily: button.fontFamily
+          fontSize: button.fontSize
+        }
+
+        Rectangle {
+          visible: service.commandUnreadCount > 0
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          width: Style.space(9)
+          height: Style.space(9)
+          radius: width / 2
+          color: root.indicatorColor
+          border.color: root.bar ? root.bar.background : Color.background
+          border.width: 1
+
+          Text {
+            anchors.centerIn: parent
+            visible: service.commandUnreadCount > 1
+            text: service.commandUnreadCount > 9 ? "9" : String(service.commandUnreadCount)
+            color: root.bar ? root.bar.background : Color.background
+            font.family: button.fontFamily
+            font.pixelSize: Math.max(Style.font.bodySmall, Style.space(6))
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+          }
+        }
+      }
+    }
+    tooltipText: service.launching ? "Opening terminal…" : root.indicatorTooltip
     onPressed: function(button) {
       if (button === Qt.RightButton) root.requestBindingInstall()
       else if (button === Qt.MiddleButton) root.toggleSettings()

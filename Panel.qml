@@ -31,6 +31,15 @@ Panel {
     if (!isFinite(value)) value = 50
     return Math.max(0, Math.min(100, Math.round(value / 10) * 10))
   }
+  readonly property bool urgencyIndicator: root.setting("urgencyIndicator", true) !== false
+  readonly property bool commandTracking: root.setting("commandTracking", false) === true
+  readonly property int commandNotifyAfterMs: {
+    var value = Number(root.setting("commandNotifyAfterMs", 5000))
+    if (!isFinite(value)) value = 5000
+    return Math.max(0, Math.min(60000, Math.round(value / 500) * 500))
+  }
+  readonly property bool commandFailureIndicator: root.setting("commandFailureIndicator", true) !== false
+  readonly property bool commandCancelIsFailure: root.setting("commandCancelIsFailure", false) === true
   readonly property color pickerColor: {
     var match = root.borderSetting.match(/^rgb\(([0-9a-fA-F]{6})\)$/)
     return match ? Qt.color("#" + match[1]) : Color.accent
@@ -42,6 +51,17 @@ Panel {
   readonly property string inputConfigPath: root.hyprConfigRoot + "/input.lua"
   readonly property string bindingLine: 'hl.bind("CTRL + GRAVE", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))'
   readonly property string fallthroughBlock: '-- BEGIN Dropdown Terminal special fallthrough\nhl.config({\n  input = {\n    special_fallthrough = true,\n  },\n})\n-- END Dropdown Terminal special fallthrough'
+  readonly property var shellStatusReport: root.hostWidget && root.hostWidget.shellStatusReport
+    ? root.hostWidget.shellStatusReport : ({})
+  readonly property string integrationShell: String(root.shellStatusReport.shell || "bash")
+  readonly property string shellConfigPath: String(root.shellStatusReport.config ||
+    ((Quickshell.env("HOME") || "") + "/.bashrc"))
+  readonly property string shellBlock: String(root.shellStatusReport.block ||
+    '# BEGIN Dropdown Terminal shell integration\nYADTM_EXISTING_DEBUG_TRAP="$(trap -p DEBUG 2>/dev/null || true)"\nYADTM_EXISTING_DEBUG_TRAP_CAPTURED=1\n[[ -r "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/bash.yadtm" ]] \\\n  && source "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/bash.yadtm"\nunset YADTM_EXISTING_DEBUG_TRAP YADTM_EXISTING_DEBUG_TRAP_CAPTURED\n# END Dropdown Terminal shell integration')
+  readonly property bool shellStatusReady: root.hostWidget && root.hostWidget.shellStatusReady === true
+  readonly property bool shellInstalled: root.hostWidget && root.hostWidget.shellStatus === "installed"
+  property bool shellPreflightWaiting: false
+  property bool shellPreflightInstall: true
   readonly property int bindingConflictCount: root.hostWidget && Array.isArray(root.hostWidget.bindingConflicts)
     ? root.hostWidget.bindingConflicts.length : 0
   readonly property string bindingConflictSummary: {
@@ -70,12 +90,20 @@ Panel {
     if (root.confirmKind === "fallthrough-disable")
       return "Remove Dropdown Terminal's focus-through override?\n\nTarget: " + root.inputConfigPath
         + "\nRemoval: removes only the marked special_fallthrough block; unrelated input settings stay unchanged."
+    if (root.confirmKind === "shell-install")
+      return "Install command tracking for " + root.integrationShell + "?\n\nTarget: " + root.shellConfigPath
+        + "\nGuarded block:\n" + root.shellBlock
+        + "\nFields written: v1 start/finish, session, sequence, timestamp, and exit status.\nPrivacy: command text and terminal output are never written.\nBackup: timestamped cp -p copy before atomic replacement.\nRemoval: deletes only the marked integration block."
+    if (root.confirmKind === "shell-remove")
+      return "Remove command tracking for " + root.integrationShell + "?\n\nTarget: " + root.shellConfigPath
+        + "\nRemoval: deletes only the marked integration block; unrelated rc content stays unchanged.\nBackup: timestamped cp -p copy before atomic replacement."
     return ""
   }
 
   readonly property string confirmAction: root.confirmKind === "binding"
     ? (root.bindingConflictCount > 0 ? "Add anyway" : "Add binding")
-    : (root.confirmKind === "fallthrough-enable" ? "Enable" : "Remove")
+    : (root.confirmKind === "fallthrough-enable" ? "Enable"
+      : (root.confirmKind === "shell-install" ? "Install" : "Remove"))
 
   function savePendingSettings() {
     if (!root.pendingSettings) return
@@ -132,7 +160,9 @@ Panel {
 
   function cancelConfirmation() {
     root.bindingPreflightWaiting = false
+    root.shellPreflightWaiting = false
     bindingPreflightTimer.stop()
+    shellPreflightTimer.stop()
     root.confirmKind = ""
     root.confirmOpenedAt = 0
   }
@@ -167,6 +197,39 @@ Panel {
     }
   }
 
+  function requestShellIntegrationChange(install) {
+    root.shellPreflightInstall = install
+    if (root.hostWidget && typeof root.hostWidget.refreshShellIntegrationStatus === "function")
+      root.hostWidget.refreshShellIntegrationStatus()
+    if (root.hostWidget && root.hostWidget.shellStatusReady === false) {
+      root.shellPreflightWaiting = true
+      shellPreflightTimer.restart()
+      return
+    }
+    if (install && root.shellInstalled) return
+    if (!install && !root.shellInstalled) return
+    root.beginConfirmation(install ? "shell-install" : "shell-remove")
+  }
+
+  Timer {
+    id: shellPreflightTimer
+    interval: 50
+    repeat: true
+    onTriggered: {
+      if (!root.shellPreflightWaiting) {
+        stop()
+        return
+      }
+      if (!root.hostWidget || root.hostWidget.shellStatusReady !== false) {
+        stop()
+        root.shellPreflightWaiting = false
+        var installed = root.hostWidget && root.hostWidget.shellStatus === "installed"
+        if ((root.shellPreflightInstall && !installed) || (!root.shellPreflightInstall && installed))
+          root.beginConfirmation(root.shellPreflightInstall ? "shell-install" : "shell-remove")
+      }
+    }
+  }
+
   function requestSpecialFallthrough(value) {
     if (value && root.hostWidget && root.hostWidget.fallthroughStatus === "installed") return
     root.beginConfirmation(value ? "fallthrough-enable" : "fallthrough-disable")
@@ -182,6 +245,12 @@ Panel {
       root.setSpecialFallthrough(true)
     } else if (kind === "fallthrough-disable") {
       root.setSpecialFallthrough(false)
+    } else if (kind === "shell-install") {
+      if (root.hostWidget && typeof root.hostWidget.installShellIntegration === "function")
+        root.hostWidget.installShellIntegration()
+    } else if (kind === "shell-remove") {
+      if (root.hostWidget && typeof root.hostWidget.removeShellIntegration === "function")
+        root.hostWidget.removeShellIntegration()
     }
   }
   function setDelay(value) { persistSettings({ autoHideDelayMs: Math.round(value) }) }
@@ -190,6 +259,11 @@ Panel {
   function setEffectIntensity(value) {
     persistSettings({ effectIntensity: Math.max(0, Math.min(100, Math.round(value / 10) * 10)) })
   }
+  function setUrgencyIndicator(value) { persistSettings({ urgencyIndicator: value }) }
+  function setCommandTracking(value) { persistSettings({ commandTracking: value }) }
+  function setCommandNotifyAfter(value) { persistSettings({ commandNotifyAfterMs: Math.round(value / 500) * 500 }) }
+  function setCommandFailureIndicator(value) { persistSettings({ commandFailureIndicator: value }) }
+  function setCommandCancelIsFailure(value) { persistSettings({ commandCancelIsFailure: value }) }
 
   function colorToHypr(color) {
     function channel(value) {
@@ -222,7 +296,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.confirming || root.bindingPreflightWaiting
+      blocked: root.confirming || root.bindingPreflightWaiting || root.shellPreflightWaiting
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
     }
@@ -517,6 +591,149 @@ Panel {
         foreground: root.contentForeground
         fontFamily: root.contentFontFamily
         onModified: function(value) { root.setEffectIntensity(value) }
+      }
+
+      PanelSeparator { width: parent.width }
+
+      Text {
+        text: "Command indicator"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        width: parent.width
+        text: "Urgency is a generic terminal-needs-attention signal. Precise running, succeeded, and failed states require the explicit shell integration below. No command text is recorded."
+        color: Util.alpha(root.contentForeground, 0.5)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        Button {
+          property bool on: root.urgencyIndicator
+          text: (on ? "✓ " : "") + "Urgency"
+          selected: on
+          tooltipText: "Show a generic attention badge when the managed terminal raises compositor urgency."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setUrgencyIndicator(!on)
+        }
+        Button {
+          property bool on: root.commandTracking
+          text: (on ? "✓ " : "") + "Command tracking"
+          selected: on
+          tooltipText: on
+            ? "Read precise shell completion events; installation remains a separate explicit action."
+            : "Keep precise shell completion tracking disabled."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setCommandTracking(!on)
+        }
+      }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(8)
+        visible: root.commandTracking
+
+        Text {
+          width: parent.width
+          text: "Shell integration: " + (root.hostWidget ? root.hostWidget.shellStatus : "unavailable")
+            + " · target: " + root.integrationShell + " · " + root.shellConfigPath
+          color: Util.alpha(root.contentForeground, 0.6)
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.WordWrap
+        }
+
+        Row {
+          width: parent.width
+          spacing: Style.space(8)
+          NumberField {
+            label: "Notify after (ms)"
+            value: root.commandNotifyAfterMs
+            from: 0
+            to: 60000
+            stepSize: 500
+            fieldWidth: Style.space(150)
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+            onModified: function(value) { root.setCommandNotifyAfter(value) }
+          }
+          Button {
+            property bool on: root.commandFailureIndicator
+            text: (on ? "✓ " : "") + "Failures"
+            selected: on
+            tooltipText: on ? "Show nonzero command exits as failed." : "Do not show nonzero command exits."
+            focusable: true
+            bordered: true
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+            onClicked: root.setCommandFailureIndicator(!on)
+          }
+          Button {
+            property bool on: root.commandCancelIsFailure
+            text: (on ? "✓ " : "") + "C-c fails"
+            selected: on
+            tooltipText: on ? "Treat exit status 130 as failed." : "Ignore exit status 130 from Ctrl-C."
+            focusable: true
+            bordered: true
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+            onClicked: root.setCommandCancelIsFailure(!on)
+          }
+        }
+
+        Row {
+          width: parent.width
+          spacing: Style.space(8)
+          Button {
+            visible: root.shellInstalled
+            text: "Remove shell integration"
+            tooltipText: "Remove only the marked command-tracking block from the selected shell rc file."
+            focusable: true
+            bordered: true
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+            onClicked: root.requestShellIntegrationChange(false)
+          }
+          Button {
+            visible: !root.shellInstalled
+            enabled: root.shellStatusReady && root.shellStatusReport.sourceReadable === true
+            text: "Install shell integration"
+            tooltipText: "Add the guarded command-tracking block after confirmation."
+            focusable: true
+            bordered: true
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+            onClicked: root.requestShellIntegrationChange(true)
+          }
+        }
+
+        Text {
+          width: parent.width
+          visible: root.hostWidget && (!root.shellStatusReady || root.shellStatusReport.sourceReadable !== true
+            || root.hostWidget.shellActionMessage !== "")
+          text: root.hostWidget && root.hostWidget.shellActionMessage !== ""
+            ? root.hostWidget.shellActionMessage
+            : (!root.shellStatusReady ? "Checking the selected shell…"
+              : (root.shellStatusReport.sourceReadable !== true
+                ? "Command tracking is unavailable: the adapter file is not readable."
+                : ""))
+          color: Util.alpha(root.contentForeground, 0.58)
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.WordWrap
+        }
       }
 
       ConfirmDialog {

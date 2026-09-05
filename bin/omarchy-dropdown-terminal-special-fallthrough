@@ -35,6 +35,25 @@ managed_block_present() {
   [[ "$actual" == "$expected" ]]
 }
 
+managed_structure_safe() {
+  [[ -f "$config_file" ]] || return 0
+  awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin {
+      if (inside) malformed = 1
+      begins++
+      inside = 1
+      next
+    }
+    $0 == end {
+      if (!inside) malformed = 1
+      ends++
+      inside = 0
+      next
+    }
+    END { exit (malformed || inside || begins > 1 || ends > 1) ? 1 : 0 }
+  ' "$config_file"
+}
+
 check_config_errors() {
   local errors
   errors="$(hyprctl configerrors -j 2>/dev/null)" || return 0
@@ -72,6 +91,8 @@ fi
 if ! flock -w 3 8; then
   exit 1
 fi
+
+managed_structure_safe || exit 1
 
 # Re-check after waiting: another service instance may have completed the
 # exact mutation while this one was blocked on the file lock.

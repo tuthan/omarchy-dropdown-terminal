@@ -17,6 +17,21 @@ Item {
   property int configRevision: 0
   property int stateRevision: 0
   property int observationRevision: 0
+  property int commandRevision: 0
+  property int eventProcessedOffset: 0
+  property string eventIncompleteTail: ""
+  property bool eventReplayReady: false
+  property var commandSessions: ({})
+  property string eventTerminalState: "closed"
+  property int eventMalformedRecords: 0
+  property int commandUnreadCount: 0
+  property string commandUnreadResult: ""
+  property string commandLatestFinishKey: ""
+  property string commandLatestResult: ""
+  property int commandLatestDurationMs: 0
+  property int commandFlashUntil: 0
+  property string commandFlashResult: ""
+  property string commandDismissedFinishKey: ""
   property string clearedTrackedAddress: ""
   readonly property bool debugEnabled: Quickshell.env("YADTM_DEBUG") === "1"
 
@@ -40,15 +55,15 @@ Item {
     }
   }
 
-  readonly property string runtimeStateRoot: {
-    var dir = Quickshell.env("XDG_RUNTIME_DIR")
-    if (dir) return dir
-    return "/tmp/omarchy-dropdown-terminal-" + (Quickshell.env("UID") || "0")
-  }
+  // Resolve this through the helper so QML and the shell agree when
+  // XDG_RUNTIME_DIR is unset or fails the helper's private-directory check.
+  // Keep the FileViews detached until the answer arrives; guessing a path here
+  // can make every bar instance read a different state journal.
+  property string runtimeStateRoot: ""
 
   FileView {
     id: stateFile
-    path: root.runtimeStateRoot + "/io.github.tuthan.dropdown-terminal.state.json"
+    path: root.runtimeStateRoot ? root.runtimeStateRoot + "/io.github.tuthan.dropdown-terminal.state.json" : ""
     watchChanges: true
     onFileChanged: reload()
     onTextChanged: {
@@ -56,6 +71,18 @@ Item {
       root.clearedTrackedAddress = ""
       root.logDebug("runtime state reloaded")
     }
+  }
+
+  // The command journal is append-only and shared by every per-screen service
+  // instance. FileView reloads asynchronously; parsing is therefore driven by
+  // textChanged, never directly from onFileChanged.
+  FileView {
+    id: commandEventsFile
+    path: root.runtimeStateRoot ? root.runtimeStateRoot + "/io.github.tuthan.dropdown-terminal.events" : ""
+    watchChanges: root.commandTracking
+    printErrors: false
+    onFileChanged: if (root.commandTracking) reload()
+    onTextChanged: if (root.commandTracking) root.consumeEventText(text(), true)
   }
 
   property int configSettleReloads: 0
@@ -68,6 +95,29 @@ Item {
       shellConfigFile.reload()
       root.configSettleReloads--
       if (root.configSettleReloads > 0) restart()
+    }
+  }
+
+  // Omarchy documents that a FileView watch can stop delivering notifications
+  // after a burst of appends. Probe only while a command is running, so idle
+  // bars create neither a timer wakeup nor a journal read.
+  Timer {
+    id: commandEventsReloadTimer
+    interval: 1000
+    repeat: true
+    running: root.commandTracking && root.commandIntegrationInstalled && root.commandRunning
+    onTriggered: commandEventsFile.reload()
+  }
+
+  Timer {
+    id: commandFlashTimer
+    interval: Math.max(1, root.commandFlashUntil - Date.now())
+    repeat: false
+    running: root.commandFlashUntil > 0
+    onTriggered: {
+      root.commandFlashUntil = 0
+      root.commandFlashResult = ""
+      root.commandRevision++
     }
   }
 
@@ -115,6 +165,207 @@ Item {
     var value = Number(setting("effectIntensity", 50))
     if (!isFinite(value)) value = 50
     return Math.max(0, Math.min(100, Math.round(value / 10) * 10))
+  }
+  readonly property bool urgencyIndicator: { configRevision; return setting("urgencyIndicator", true) !== false }
+  readonly property bool commandTracking: { configRevision; return setting("commandTracking", false) === true }
+  readonly property int commandNotifyAfterMs: {
+    configRevision
+    var value = Number(setting("commandNotifyAfterMs", 5000))
+    if (!isFinite(value)) value = 5000
+    return Math.max(0, Math.min(60000, Math.round(value / 500) * 500))
+  }
+  readonly property bool commandFailureIndicator: { configRevision; return setting("commandFailureIndicator", true) !== false }
+  readonly property bool commandCancelIsFailure: { configRevision; return setting("commandCancelIsFailure", false) === true }
+
+  function resetCommandEvents() {
+    root.eventProcessedOffset = 0
+    root.eventIncompleteTail = ""
+    root.eventReplayReady = false
+    root.commandSessions = ({})
+    root.eventTerminalState = "closed"
+    root.eventMalformedRecords = 0
+    root.commandUnreadCount = 0
+    root.commandUnreadResult = ""
+    root.commandLatestFinishKey = ""
+    root.commandLatestResult = ""
+    root.commandLatestDurationMs = 0
+    root.commandFlashUntil = 0
+    root.commandFlashResult = ""
+    root.commandDismissedFinishKey = ""
+    root.commandRevision++
+  }
+
+  function validEventSession(value) {
+    return typeof value === "string" && value.length > 0 && value.length <= 128
+      && !/[\t\r\n ]/.test(value)
+  }
+
+  function validEventSequence(value) {
+    return typeof value === "string" && /^[0-9]+$/.test(value) && value.length <= 20
+  }
+
+  function eventTimestamp(value) {
+    var timestamp = Number(value)
+    return isFinite(timestamp) && timestamp >= 0 ? timestamp : NaN
+  }
+
+  function eventResultForStatus(status) {
+    if (status === 130 && !root.commandCancelIsFailure) return "cancelled"
+    return status === 0 ? "succeeded" : "failed"
+  }
+
+  function applyCommandFinish(fields, allowTransient) {
+    if (fields.length !== 6 && fields.length !== 7) return false
+    var sessionId = fields[2]
+    var sequence = fields[3]
+    var finishTimestamp = eventTimestamp(fields[4])
+    var status = Number(fields[5])
+    if (!root.validEventSession(sessionId) || !root.validEventSequence(sequence)
+        || !isFinite(finishTimestamp) || !/^-?[0-9]+$/.test(fields[5])
+        || !isFinite(status)) return false
+
+    var session = root.commandSessions[sessionId]
+    if (!session || !session.starts) return false
+    var key = sessionId + "\t" + sequence
+    var start = session.starts[sequence]
+    if (!start || session.commands[key]) return false
+
+    var durationMs = NaN
+    if (fields.length === 7 && /^[0-9]+$/.test(fields[6]))
+      durationMs = Number(fields[6])
+    if (!isFinite(durationMs) && finishTimestamp >= start.timestamp && start.timestamp > 0)
+      durationMs = Math.round((finishTimestamp - start.timestamp) * 1000)
+    if (!isFinite(durationMs) || durationMs < 0 || durationMs > 2147483647) return false
+
+    var result = root.eventResultForStatus(status)
+    var cancelled = result === "cancelled"
+    var qualifies = !cancelled && durationMs >= root.commandNotifyAfterMs
+      && (result !== "failed" || root.commandFailureIndicator)
+    session.commands[key] = {
+      result: result, durationMs: durationMs, status: status, qualifies: qualifies,
+      lifecycle: root.eventTerminalState
+    }
+    root.commandLatestFinishKey = key
+    root.commandLatestResult = result
+    root.commandLatestDurationMs = durationMs
+    if (qualifies && root.eventTerminalState === "hidden") {
+      root.commandUnreadCount++
+      root.commandUnreadResult = result
+    } else if (qualifies && allowTransient === true && root.eventTerminalState === "shown") {
+      root.commandFlashResult = result
+      root.commandFlashUntil = Date.now() + 900
+      commandFlashTimer.restart()
+    }
+    return true
+  }
+
+  function applyCommandStart(fields) {
+    if (fields.length !== 5) return false
+    var sessionId = fields[2]
+    var sequence = fields[3]
+    var timestamp = eventTimestamp(fields[4])
+    if (!root.validEventSession(sessionId) || !root.validEventSequence(sequence)
+        || !isFinite(timestamp)) return false
+    var sessions = root.commandSessions
+    var session = sessions[sessionId]
+    if (!session) session = { starts: ({}), commands: ({}) }
+    session.starts[sequence] = { timestamp: timestamp }
+    sessions[sessionId] = session
+    root.commandSessions = sessions
+    return true
+  }
+
+  function applyLifecycle(fields) {
+    if (fields.length !== 6) return false
+    var phase = fields[1]
+    var timestamp = eventTimestamp(fields[4])
+    var address = String(fields[5] || "")
+    if (["shown", "hidden", "closed"].indexOf(phase) < 0
+        || fields[2] !== "helper" || !validEventSession(fields[3])
+        || !isFinite(timestamp) || !/^0x[0-9a-f]+$/i.test(address)) return false
+    root.eventTerminalState = phase
+    if (phase === "closed") {
+      // A terminal close can race the shell's final prompt, so its active
+      // commands may never emit a finish record. Discard those starts now;
+      // otherwise a replay would keep the command indicator and reload timer
+      // permanently in the running state after the terminal is reopened.
+      var sessions = root.commandSessions
+      for (var sessionId in sessions) {
+        var session = sessions[sessionId]
+        if (!session || !session.starts) continue
+        for (var sequence in session.starts) {
+          var key = sessionId + "\t" + sequence
+          if (!session.commands || !session.commands[key]) delete session.starts[sequence]
+        }
+      }
+      root.commandSessions = sessions
+    }
+    if (phase === "shown" || phase === "closed") {
+      root.commandUnreadCount = 0
+      root.commandUnreadResult = ""
+      root.commandDismissedFinishKey = root.commandLatestFinishKey
+    }
+    return true
+  }
+
+  function applyEventLine(line, allowTransient) {
+    if (!line) return true
+    var fields = line.split("\t")
+    if (fields[0] !== "v1") return false
+    if (fields[1] === "start") return root.applyCommandStart(fields)
+    if (fields[1] === "finish") return root.applyCommandFinish(fields, allowTransient)
+    if (fields[1] === "shown" || fields[1] === "hidden" || fields[1] === "closed")
+      return root.applyLifecycle(fields)
+    return false
+  }
+
+  function consumeEventText(raw, fileLoadComplete) {
+    var text = String(raw || "")
+    if (text.length < root.eventProcessedOffset) root.resetCommandEvents()
+    var allowTransient = root.eventReplayReady
+    var added = text.substring(root.eventProcessedOffset)
+    var combined = root.eventIncompleteTail + added
+    var hasTrailingNewline = combined.endsWith("\n")
+    var lines = combined.split("\n")
+    if (hasTrailingNewline) {
+      lines.pop()
+      root.eventIncompleteTail = ""
+    } else {
+      root.eventIncompleteTail = lines.pop() || ""
+    }
+    var malformed = 0
+    for (var i = 0; i < lines.length; i++) {
+      if (!root.applyEventLine(lines[i], allowTransient)) malformed++
+    }
+    root.eventMalformedRecords += malformed
+    root.eventProcessedOffset = text.length
+    // The first completed FileView load is the replay baseline. The fallback
+    // nudge may see an empty stale value while reload() is still async, so it
+    // only establishes the baseline once text is present.
+    if (fileLoadComplete === true || text.length > 0) root.eventReplayReady = true
+    root.commandRevision++
+    // This is a presentational dismissal only. Historical hidden-at-finish
+    // classification above always uses event order, never current visibility.
+    if (root.terminalFocused || root.terminalVisible) root.clearCommandUnread()
+    if (malformed > 0) root.logDebug("event journal malformed records=" + malformed)
+  }
+
+  function clearCommandUnread() {
+    if (root.commandUnreadCount === 0) return
+    root.commandUnreadCount = 0
+    root.commandUnreadResult = ""
+    root.commandDismissedFinishKey = root.commandLatestFinishKey
+    root.commandRevision++
+  }
+
+  function reloadCommandEvents() {
+    commandEventsFile.reload()
+    // A reload may complete without changing FileView.text() when tracking is
+    // toggled off and on. Re-read on the next event-loop turn so replay still
+    // reconstructs the existing journal from offset zero.
+    Qt.callLater(function() {
+      if (root.commandTracking) root.consumeEventText(commandEventsFile.text(), false)
+    })
   }
 
   function parsedState() {
@@ -176,6 +427,44 @@ Item {
     return !!root.trackedAddress && !!active && active.address === root.trackedAddress
   }
 
+  readonly property bool terminalUrgent: {
+    observationRevision
+    var toplevel = root.trackedToplevel
+    return root.urgencyIndicator && !!toplevel && toplevel.urgent === true
+  }
+
+  readonly property bool commandRunning: {
+    commandRevision
+    for (var sessionId in root.commandSessions) {
+      var session = root.commandSessions[sessionId]
+      if (!session || !session.starts) continue
+      for (var sequence in session.starts) {
+        var key = sessionId + "\t" + sequence
+        if (!session.commands || !session.commands[key]) return true
+      }
+    }
+    return false
+  }
+
+  readonly property bool commandUnread: { commandRevision; return root.commandUnreadCount > 0 }
+  readonly property bool commandFlashActive: {
+    commandRevision
+    return root.commandFlashUntil > Date.now() && root.commandFlashResult !== ""
+  }
+
+  readonly property string indicatorState: {
+    commandRevision
+    if (root.commandTracking && root.commandIntegrationInstalled) {
+      if (root.commandFlashActive) return root.commandFlashResult
+      if (root.commandRunning) return "running"
+      if (root.commandUnread && (root.commandUnreadResult === "succeeded" || root.commandUnreadResult === "failed"))
+        return root.commandUnreadResult
+    }
+    if (root.urgencyIndicator && !root.terminalVisible && !root.terminalFocused && root.terminalUrgent)
+      return "attention"
+    return "idle"
+  }
+
   readonly property rect terminalRect: {
     observationRevision
     var ipc = root.trackedToplevel ? root.trackedToplevel.lastIpcObject : null
@@ -211,10 +500,25 @@ Item {
   readonly property string helperPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal").toString().replace(/^file:\/\//, "")
   readonly property string bindPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal-bind").toString().replace(/^file:\/\//, "")
   readonly property string fallthroughPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal-special-fallthrough").toString().replace(/^file:\/\//, "")
+  readonly property string shellIntegrationPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal-shell").toString().replace(/^file:\/\//, "")
+
+  Process {
+    id: runtimeStateRootProcess
+    command: ["bash", root.helperPath, "state-root"]
+    stdout: StdioCollector { id: runtimeStateRootOutput; waitForEnd: true }
+    running: false
+    onExited: {
+      var candidate = String(runtimeStateRootOutput.text || "").trim()
+      if (candidate.charAt(0) === "/" && candidate.indexOf("\n") < 0 && candidate.indexOf("\r") < 0)
+        root.runtimeStateRoot = candidate
+    }
+  }
+
   // Every helper action mutates the same window, workspace, and compositor
   // animation state, so they must never overlap; the helper's own flock is a
   // second line of defense for direct invocations.
   readonly property bool busy: toggleProcess.running || hideProcess.running || reconcileProcess.running
+  property bool closeReconcilePending: false
   // User-facing subset: only actions that actually summon the terminal.
   readonly property bool launching: toggleProcess.running || hideProcess.running
   // Timestamp of the last toggle start; focus events within this window belong
@@ -226,16 +530,38 @@ Item {
   property var bindingConflicts: []
   property bool bindingStatusReady: false
   property string fallthroughStatus: "unknown"
+  property string shellStatus: "unknown"
+  property var shellStatusReport: ({})
+  property bool shellStatusReady: false
+  property string shellMutationAction: ""
+  property string shellActionMessage: ""
+
+  readonly property bool commandIntegrationInstalled: {
+    shellStatusRevision
+    return root.commandTracking && root.shellStatus === "installed"
+      && root.shellStatusReport && root.shellStatusReport.sourceReadable === true
+  }
+  property int shellStatusRevision: 0
+
+  onCommandTrackingChanged: {
+    root.resetCommandEvents()
+    if (root.commandTracking) root.reloadCommandEvents()
+  }
+  onTerminalVisibleChanged: if (root.terminalVisible) root.clearCommandUnread()
+  onTerminalFocusedChanged: if (root.terminalFocused) root.clearCommandUnread()
 
   onAllowSpecialFallthroughChanged: {
     if (settingsReady) applySpecialFallthrough(allowSpecialFallthrough)
   }
 
   Component.onCompleted: {
+    runtimeStateRootProcess.running = true
     root.refreshObservedState()
     settingsReady = true
     if (allowSpecialFallthrough) applySpecialFallthrough(true)
     refreshMutationStatus()
+    refreshShellIntegrationStatus()
+    if (commandTracking) reloadCommandEvents()
     root.logDebug("service ready address=" + root.trackedAddress)
   }
 
@@ -273,8 +599,11 @@ Item {
         if (!root.trackedAddress) root.refreshToplevels()
       } else if (name === "closewindow") {
         var closed = event.address || event.data || ""
-        if (root.trackedAddress && root.normalizedAddress(closed) === root.normalizedAddress(root.trackedAddress))
+        var matchesTracked = root.trackedAddress && root.normalizedAddress(closed) === root.normalizedAddress(root.trackedAddress)
+        if (matchesTracked) {
           root.clearedTrackedAddress = root.trackedAddress
+          root.requestCloseReconcile()
+        }
         root.refreshToplevels()
       } else if (name === "movewindow" || name === "movewindowv2") {
         root.refreshToplevels()
@@ -367,6 +696,35 @@ Item {
     }
   }
 
+  Process {
+    id: shellStatusProcess
+    command: ["bash", root.shellIntegrationPath, "status"]
+    stdout: StdioCollector { id: shellStatusOutput; waitForEnd: true }
+    onExited: {
+      var report = root.parseMutationStatus(shellStatusOutput.text)
+      root.shellStatusReport = report
+      root.shellStatus = report.available !== true ? "unavailable"
+        : (report.supported === false ? "unsupported"
+          : (report.installed === true ? "installed" : "not installed"))
+      root.shellStatusReady = true
+      root.shellStatusRevision++
+      root.finishShellMutationFromStatus(report)
+    }
+  }
+
+  Process {
+    id: shellMutationProcess
+    property string requestedAction: ""
+    command: ["bash", root.shellIntegrationPath, requestedAction]
+    running: false
+    onExited: {
+      // Exit status alone is not a success signal. The exact managed block is
+      // checked by a fresh status read-back before the panel reports success.
+      root.shellStatusReady = false
+      if (!shellStatusProcess.running) shellStatusProcess.running = true
+    }
+  }
+
   function toggle() {
     var now = Date.now()
     // Debounce: duplicate keybindings or key repeat must not queue a second
@@ -389,6 +747,21 @@ Item {
 
   function reconcileSpecialWorkspace() {
     if (!root.busy) reconcileProcess.running = true
+  }
+
+  function requestCloseReconcile() {
+    if (!root.busy) {
+      reconcileProcess.running = true
+    } else {
+      root.closeReconcilePending = true
+    }
+  }
+
+  onBusyChanged: {
+    if (!root.busy && root.closeReconcilePending) {
+      root.closeReconcilePending = false
+      reconcileProcess.running = true
+    }
   }
 
   function applySpecialFallthrough(enabled) {
@@ -414,6 +787,39 @@ Item {
     } catch (e) {
       return { available: false }
     }
+  }
+
+  function finishShellMutationFromStatus(report) {
+    if (root.shellMutationAction === "") return
+    var action = root.shellMutationAction
+    var exact = report && report.available === true && report.supported !== false
+      && report.sourceReadable === true
+    var installed = exact && report.installed === true
+    if (action === "install") {
+      root.shellActionMessage = installed
+        ? "Installed command tracking for " + String(report.shell || "the login shell") + "."
+        : "Install failed: the exact guarded block was not read back."
+    } else {
+      root.shellActionMessage = exact && !installed
+        ? "Removed command tracking from " + String(report.shell || "the login shell") + "."
+        : "Remove failed: the exact guarded block is still present."
+    }
+    root.shellMutationAction = ""
+  }
+
+  function refreshShellIntegrationStatus() {
+    root.shellStatusReady = false
+    if (!shellStatusProcess.running && !shellMutationProcess.running)
+      shellStatusProcess.running = true
+  }
+
+  function mutateShellIntegration(action) {
+    if (action !== "install" && action !== "remove") return
+    if (shellMutationProcess.running || shellStatusProcess.running) return
+    root.shellActionMessage = ""
+    root.shellMutationAction = action
+    shellMutationProcess.requestedAction = action
+    shellMutationProcess.running = true
   }
 
   function refreshMutationStatus() {

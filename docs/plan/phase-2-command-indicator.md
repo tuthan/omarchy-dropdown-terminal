@@ -320,3 +320,38 @@ mv the plugin dir aside; open a new shell   # must be silent, not an error
   any of it is written.
 - Does foot's OSC 777 path set the Hyprland urgency flag, or only emit a desktop
   notification? Tier 0's usefulness depends on the former.
+
+## Implementation record — 2026-09-05
+
+Implemented the complete Phase 2 software slice:
+
+- `Service.qml` observes the managed toplevel's `urgent` property, consumes the
+  shared append-only journal after asynchronous `FileView.reload()`, retains an
+  incomplete trailing record, replays lifecycle order, abandons unmatched
+  starts when the terminal closes, and re-probes at 1 Hz only while a configured
+  command remains running. Historical replay cannot create a transient flash.
+- `bin/omarchy-dropdown-terminal` scopes the journal/session environment to a
+  newly launched terminal and appends `shown`, `hidden`, and `closed` records
+  only after the corresponding helper transition succeeds.
+- `shell/bash.yadtm`, `shell/zsh.yadtm`, and `shell/fish.yadtm` provide guarded,
+  fork-free prompt/event adapters. Bash puts its precmd hook at the front of
+  `PROMPT_COMMAND`, preserves an existing `DEBUG` trap captured at rc-file
+  top level before sourcing, and captures the prompt status before other prompt
+  tooling runs. Every adapter includes its shell PID in the session key.
+  `bash-preexec` is not
+  installed on this host, so the documented hand-rolled fallback was selected
+  after the Starship/status-preservation check. Fish uses its builtin
+  `CMD_DURATION` field because Fish has no portable clock builtin.
+- `bin/omarchy-dropdown-terminal-shell` provides explicit per-shell
+  `install`, `remove`, and `status` actions with exact marker-block read-back,
+  timestamped backups, atomic replacement, and uninstall-safe source guards.
+- The bar and panel expose the four semantic states, all five planned settings,
+  generic urgency limitations, and cancel-first shell edit confirmations.
+
+Automated verification on this checkout: `bash tests/run.sh` (99 checks),
+`qmllint` for all plugin QML files, `jq empty manifest.json`, `bash -n` for all
+helpers/adapters, and `git diff --check` all pass. Live checks that require the
+active Omarchy compositor—urgency propagation, physical input pass-through,
+prompt timing with the installed Starship setup, and terminal-server
+environment inheritance—remain machine-session checks because this shell has
+no usable Hyprland socket.

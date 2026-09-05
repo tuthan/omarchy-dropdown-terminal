@@ -1,0 +1,43 @@
+# Dropdown Terminal command tracking for Zsh.
+
+[[ ${YADTM_TERMINAL:-} == 1 && -n ${YADTM_COMMAND_EVENTS:-} ]] || return 0
+[[ -o interactive ]] || return 0
+[[ ${_yadtm_zsh_loaded:-0} == 1 ]] && return 0
+
+_yadtm_zsh_loaded=1
+_yadtm_session="${YADTM_TERMINAL_SESSION:-zsh}-zsh-$$"
+typeset -gi _yadtm_seq=0
+typeset -gi _yadtm_started=0
+typeset -gi _yadtm_active_seq=0
+zmodload zsh/datetime 2>/dev/null || true
+
+_yadtm_start() {
+  (( _yadtm_started == 0 )) || return 0
+  _yadtm_seq=$((_yadtm_seq + 1))
+  _yadtm_active_seq=$_yadtm_seq
+  _yadtm_started=1
+  printf 'v1\tstart\t%s\t%s\t%s\n' "$_yadtm_session" "$_yadtm_active_seq" "${EPOCHREALTIME:-0}" >>"$YADTM_COMMAND_EVENTS" 2>/dev/null || true
+}
+
+_yadtm_finish() {
+  local _yadtm_status="$1"
+  (( _yadtm_started == 1 )) || return 0
+  _yadtm_started=0
+  printf 'v1\tfinish\t%s\t%s\t%s\t%s\n' "$_yadtm_session" "$_yadtm_active_seq" "${EPOCHREALTIME:-0}" "$_yadtm_status" >>"$YADTM_COMMAND_EVENTS" 2>/dev/null || true
+}
+
+_yadtm_preexec() {
+  _yadtm_start
+}
+
+_yadtm_precmd() {
+  _yadtm_prompt_status=$?
+  _yadtm_finish "$_yadtm_prompt_status"
+  return "$_yadtm_prompt_status"
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook -d preexec _yadtm_preexec 2>/dev/null || true
+add-zsh-hook -d precmd _yadtm_precmd 2>/dev/null || true
+add-zsh-hook preexec _yadtm_preexec
+add-zsh-hook precmd _yadtm_precmd

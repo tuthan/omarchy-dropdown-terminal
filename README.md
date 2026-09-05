@@ -117,6 +117,41 @@ terminal finishes settling into place. **Off** unloads the effect surface;
 steps of 10. The effect is click-through, follows the terminal's output and
 corner radius, and does not represent command success, failure, or attention.
 
+### Command completion indicator
+
+The bar icon can show four semantic states: `running`, generic `attention`,
+`succeeded`, and `failed`. The generic attention state uses the managed
+terminal's Hyprland urgency flag and requires no shell changes; it means only
+that the terminal needs attention, not that a command succeeded or failed.
+
+For precise completion status, enable **Command tracking** in the settings
+panel. Enabling the preference does not edit a shell startup file. It reveals
+an explicit, cancel-first **Install shell integration** action for the current
+login shell (Bash, Zsh, or Fish). The confirmation names the exact rc file and
+guarded source block, creates a timestamped `cp -p` backup before an atomic
+replacement, and the helper verifies the exact block after the edit. The
+matching remove action deletes only that marked block.
+
+The hooks append one short, newline-terminated record per event to the private
+per-login journal at:
+
+```text
+$XDG_RUNTIME_DIR/io.github.tuthan.dropdown-terminal.events
+```
+
+They use shell builtins on the prompt path and never store command text,
+terminal output, or prompt output. Commands shorter than the configurable
+**Command notify threshold** (5 seconds by default) do not notify. Exit status
+130 is ignored by default; **Treat Ctrl-C as failure** changes that policy.
+Foreground commands only are tracked: a command sent to the background is
+complete from the prompt's point of view, while true job-control notifications
+are outside this phase.
+
+The helper exports the journal path and a per-launch session token only to the
+terminal it starts. If a terminal server discards per-launch environment, its
+precise command tracking is unsupported; the generic urgency indicator remains
+available. Showing or focusing the dropdown clears unread completion state.
+
 From a terminal, the same setting can be changed with:
 
 ```bash

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Complete phase 2 command completion indicators: generic Hyprland urgency,
+  precise fork-free Bash/Zsh/Fish journal adapters, hidden-at-finish replay,
+  scoped launch environment, and explicit reversible shell integration.
+- Fix Phase 2 release blockers: terminal-close cleanup, Bash `DEBUG` trap
+  preservation, PID-scoped shell sessions, and replay-only completion flashes.
 - Complete phase 1 entrance effects: a theme-aware, click-through glow that
   follows the terminal across outputs, waits for the reveal to settle, and
   cleans up its bounded animation and particle surface.

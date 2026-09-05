@@ -1,0 +1,107 @@
+# Dropdown Terminal command tracking for Bash.
+#
+# This file is sourced from an explicit, guarded rc-file block. It is inert in
+# ordinary shells and does not write command text anywhere. The DEBUG trap is
+# only used as a fork-free preexec boundary; the prompt hook carries the prior
+# command's exit status to the journal.
+
+[[ ${YADTM_TERMINAL:-} == 1 && -n ${YADTM_COMMAND_EVENTS:-} ]] || return 0
+[[ $- == *i* ]] || return 0
+[[ ${YADTM_EXISTING_DEBUG_TRAP_CAPTURED:-0} == 1 ]] || return 0
+[[ ${_yadtm_bash_loaded:-0} == 1 ]] && return 0
+
+_yadtm_bash_loaded=1
+_yadtm_session="${YADTM_TERMINAL_SESSION:-bash}-bash-${BASHPID:-$$}"
+_yadtm_seq=0
+_yadtm_active_seq=0
+_yadtm_started=0
+_yadtm_ready=0
+_yadtm_in_debug=0
+printf -v _yadtm_debug_command_var '%s%s' BASH_ COMMAND
+
+_yadtm_start() {
+  [[ ${_yadtm_started:-0} == 0 ]] || return 0
+  _yadtm_seq=$((_yadtm_seq + 1))
+  _yadtm_active_seq=$_yadtm_seq
+  _yadtm_started=1
+  # Keep this as one builtin printf append. In particular, do not add command
+  # text or call a helper from the prompt path.
+  printf 'v1\tstart\t%s\t%s\t%s\n' "$_yadtm_session" "$_yadtm_active_seq" "${EPOCHREALTIME:-0}" >>"$YADTM_COMMAND_EVENTS" 2>/dev/null || :
+}
+
+_yadtm_finish() {
+  local _yadtm_status="$1"
+  [[ ${_yadtm_started:-0} == 1 ]] || return 0
+  _yadtm_started=0
+  printf 'v1\tfinish\t%s\t%s\t%s\t%s\n' "$_yadtm_session" "$_yadtm_active_seq" "${EPOCHREALTIME:-0}" "$_yadtm_status" >>"$YADTM_COMMAND_EVENTS" 2>/dev/null || :
+}
+
+_yadtm_precmd() {
+  _yadtm_prompt_status=$?
+  _yadtm_finish "$_yadtm_prompt_status"
+  # The DEBUG trap also runs before each PROMPT_COMMAND entry. Clear the arm
+  # before any user prompt tooling runs; the final arm hook below sets it only
+  # after the prompt has been prepared.
+  _yadtm_ready=0
+  return "$_yadtm_prompt_status"
+}
+
+_yadtm_arm_prompt() {
+  _yadtm_ready=1
+  return 0
+}
+
+# A DEBUG trap fires before the first simple command in a submitted command
+# line. The prompt hook arms it only after a prompt has actually been shown,
+# so empty prompts and prompt-tool internals do not become fake commands.
+_yadtm_existing_debug_trap=""
+# Bash suppresses trap -p DEBUG output while evaluating a sourced file. The
+# installer therefore captures it at the rc-file's top level and passes it
+# through this one-time environment-like variable before sourcing us.
+_yadtm_existing_debug_trap="${YADTM_EXISTING_DEBUG_TRAP:-}"
+_yadtm_existing_debug_body=""
+if [[ -n $_yadtm_existing_debug_trap ]]; then
+  _yadtm_existing_debug_body="${_yadtm_existing_debug_trap#trap -- }"
+  _yadtm_existing_debug_body="${_yadtm_existing_debug_body% DEBUG}"
+  # trap -p returns shell-quoted source. Decode that once at startup; the
+  # decoded body is only invoked to preserve the user's existing trap.
+  eval "_yadtm_existing_debug_body=$_yadtm_existing_debug_body"
+fi
+
+_yadtm_debug_trap() {
+  _yadtm_debug_status=$?
+  [[ ${_yadtm_in_debug:-0} == 0 ]] || return 0
+  _yadtm_in_debug=1
+  # The trap fires before the first PROMPT_COMMAND function as well as before
+  # real user commands. The internal precmd name is the stable boundary that
+  # prevents the arm left by the previous prompt from becoming a fake command.
+  _yadtm_is_precmd=0
+  [[ ${!_yadtm_debug_command_var:-} == _yadtm_precmd ]] && _yadtm_is_precmd=1
+  if [[ -n ${_yadtm_existing_debug_body:-} ]]; then
+    eval "$_yadtm_existing_debug_body"
+  fi
+  if (( _yadtm_is_precmd )); then
+    _yadtm_ready=0
+  elif [[ ${_yadtm_ready:-0} == 1 ]]; then
+    _yadtm_ready=0
+    _yadtm_start
+  fi
+  _yadtm_in_debug=0
+  return 0
+}
+
+trap '_yadtm_debug_trap' DEBUG
+
+# Put our precmd first so Starship or another prompt helper cannot consume the
+# command status before it is journaled. Preserve scalar and array forms.
+_yadtm_prompt_decl="$(declare -p PROMPT_COMMAND 2>/dev/null || true)"
+if [[ $_yadtm_prompt_decl == "declare -a PROMPT_COMMAND="* ]]; then
+  PROMPT_COMMAND=(_yadtm_precmd "${PROMPT_COMMAND[@]}" _yadtm_arm_prompt)
+else
+  _yadtm_existing_prompt_command="${PROMPT_COMMAND:-}"
+  if [[ -n $_yadtm_existing_prompt_command ]]; then
+    PROMPT_COMMAND=(_yadtm_precmd "$_yadtm_existing_prompt_command" _yadtm_arm_prompt)
+  else
+    PROMPT_COMMAND=(_yadtm_precmd _yadtm_arm_prompt)
+  fi
+fi
