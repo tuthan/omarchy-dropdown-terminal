@@ -114,7 +114,7 @@ Panel {
         + "\nRemoval: removes only the marked special_fallthrough block; unrelated input settings stay unchanged."
     if (root.confirmKind === "shell-install")
       return "Install command tracking for " + root.integrationShell + "?\n\nTarget: " + root.shellConfigPath
-        + "\nGuarded block:\n" + root.shellBlock
+        + "\nGuarded source: add only the marked Dropdown Terminal block."
         + "\nFields written: v1 start/finish, session, sequence, timestamp, and exit status.\nPrivacy: command text and terminal output are never written.\nBackup: timestamped cp -p copy before atomic replacement.\nRemoval: deletes only the marked integration block."
     if (root.confirmKind === "shell-remove")
       return "Remove command tracking for " + root.integrationShell + "?\n\nTarget: " + root.shellConfigPath
@@ -333,10 +333,22 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
     }
 
-    Column {
-      id: content
-      width: panel.contentWidth - panel.padding * 2
-      spacing: Style.space(10)
+    Flickable {
+      id: contentScroll
+      anchors.fill: parent
+      clip: true
+      contentWidth: width
+      contentHeight: content.implicitHeight
+      interactive: contentHeight > height
+      boundsBehavior: Flickable.StopAtBounds
+      flickableDirection: Flickable.VerticalFlick
+
+      ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+      Column {
+        id: content
+        width: contentScroll.width
+        spacing: Style.space(10)
 
       Text {
         width: parent.width
@@ -600,7 +612,7 @@ Panel {
         wrapMode: Text.WordWrap
       }
 
-      ButtonGroup {
+      WrappedButtonGroup {
         width: parent.width
         options: [
           { value: "Off", label: "Off", tooltip: "Do not create an entrance-effect surface." },
@@ -872,6 +884,8 @@ Panel {
           font.pixelSize: Style.font.bodySmall
           wrapMode: Text.WordWrap
         }
+      }
+
       }
 
       ConfirmDialog {
