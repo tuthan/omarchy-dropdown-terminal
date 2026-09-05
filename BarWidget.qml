@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import qs.Commons
 import qs.Ui
 
@@ -74,6 +75,20 @@ BarWidget {
   readonly property var bindingConflicts: service.bindingConflicts
   readonly property bool bindingStatusReady: service.bindingStatusReady
   readonly property string fallthroughStatus: service.fallthroughStatus
+
+  // BarWidget is instantiated once per output by Omarchy. The loader keeps
+  // the Off path genuinely absent: no PanelWindow, particle system, timers,
+  // or rounding probe exist when the user disables entrance effects.
+  Loader {
+    id: effectsLoader
+    active: service.entranceEffect !== "Off"
+    sourceComponent: Component {
+      TerminalEffects {
+        service: service
+        hostScreen: root.QsWindow.window ? root.QsWindow.window.screen : null
+      }
+    }
+  }
 
   Loader {
     id: settingsLoader

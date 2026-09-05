@@ -229,3 +229,24 @@ hyprctl keyword monitor HEADLESS-2,1920x1080@60,3440x0,1.25
   terminal's own resize edges under `special_fallthrough`? The
   `allowSpecialFallthrough` setting changes pointer routing while the dropdown
   is open, and the interaction with an overlay gutter is untested.
+
+## Implementation record — 2026-09-05
+
+The Glow slice is implemented in `TerminalEffects.qml` and loaded lazily by
+each existing `BarWidget.qml` screen instance. It uses the observed terminal
+rectangle and monitor, a bounded settle/refresh lifecycle, the Hyprland
+rounding query cache, an empty input region, and a finite particle cap. The
+`entranceEffect` (`Off`/`Glow`) and `effectIntensity` (0–100, step 10) settings
+are present in both the manifest and the native settings panel. The Embers
+variant remains the explicitly gated follow-up above and is not enabled before
+Glow receives the live placement and input-pass-through check.
+The lifecycle also re-arms from terminal-monitor transitions, never arms a
+non-owner output, preserves a configured zero radius, and makes intensity 0
+fully invisible.
+
+Automated verification on this checkout: `bash tests/run.sh` (60 checks),
+`qmllint` for all plugin QML files, `jq empty manifest.json`, `bash -n` for all
+helpers, and `git diff --check` all pass. Live compositor checks are pending in
+this shell because `hyprctl -j monitors` cannot connect to a Hyprland socket;
+the headless-output, fractional-scale, input-pass-through, theme, and idle
+sampler checks must be run from the active Omarchy session before release.

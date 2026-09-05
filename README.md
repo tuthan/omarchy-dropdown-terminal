@@ -111,6 +111,12 @@ keeping the global shortcut and terminal service active.
 The **Bar icon** setting accepts a Nerd Font glyph or short text and shows a
 live preview in the settings panel. The default is the terminal glyph `\uF120`.
 
+The **Entrance effect** setting controls the decorative glow shown after the
+terminal finishes settling into place. **Off** unloads the effect surface;
+**Glow** is enabled by default. **Effect intensity** ranges from 0 to 100 in
+steps of 10. The effect is click-through, follows the terminal's output and
+corner radius, and does not represent command success, failure, or attention.
+
 From a terminal, the same setting can be changed with:
 
 ```bash

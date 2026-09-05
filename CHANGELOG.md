@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Complete phase 1 entrance effects: a theme-aware, click-through glow that
+  follows the terminal across outputs, waits for the reveal to settle, and
+  cleans up its bounded animation and particle surface.
 - Complete phase 0 foundation: event-driven Hyprland observation, bounded
   helper actions, lock-free diagnostics, and atomic versioned runtime state.
 - Migrate legacy `address` and `special-animation` runtime markers to the

@@ -101,6 +101,21 @@ Item {
   readonly property int heightPercent: { configRevision; return Math.max(20, Math.min(100, Number(setting("heightPercent", 45)))) }
   readonly property string borderColor: { configRevision; return String(setting("borderColor", "theme")) }
   readonly property bool slideFromTop: { configRevision; return setting("slideFromTop", true) !== false }
+  // Manifest enum values are display strings and therefore part of the
+  // persisted contract. Keep the runtime contract closed: an unknown value
+  // falls back to the shipped Glow preset instead of creating an unsupported
+  // surface or silently disabling the feature.
+  readonly property string entranceEffect: {
+    configRevision
+    var value = String(setting("entranceEffect", "Glow")).toLowerCase()
+    return value === "off" ? "Off" : "Glow"
+  }
+  readonly property int effectIntensity: {
+    configRevision
+    var value = Number(setting("effectIntensity", 50))
+    if (!isFinite(value)) value = 50
+    return Math.max(0, Math.min(100, Math.round(value / 10) * 10))
+  }
 
   function parsedState() {
     stateRevision

@@ -22,6 +22,15 @@ Panel {
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string borderSetting: String(root.setting("borderColor", "theme"))
   readonly property bool slideFromTop: root.setting("slideFromTop", true) !== false
+  readonly property string entranceEffect: {
+    var value = String(root.setting("entranceEffect", "Glow")).toLowerCase()
+    return value === "off" ? "Off" : "Glow"
+  }
+  readonly property int effectIntensity: {
+    var value = Number(root.setting("effectIntensity", 50))
+    if (!isFinite(value)) value = 50
+    return Math.max(0, Math.min(100, Math.round(value / 10) * 10))
+  }
   readonly property color pickerColor: {
     var match = root.borderSetting.match(/^rgb\(([0-9a-fA-F]{6})\)$/)
     return match ? Qt.color("#" + match[1]) : Color.accent
@@ -177,6 +186,10 @@ Panel {
   }
   function setDelay(value) { persistSettings({ autoHideDelayMs: Math.round(value) }) }
   function setSlideFromTop(value) { persistSettings({ slideFromTop: value }) }
+  function setEntranceEffect(value) { persistSettings({ entranceEffect: value }) }
+  function setEffectIntensity(value) {
+    persistSettings({ effectIntensity: Math.max(0, Math.min(100, Math.round(value / 10) * 10)) })
+  }
 
   function colorToHypr(color) {
     function channel(value) {
@@ -463,6 +476,47 @@ Panel {
           fontFamily: root.contentFontFamily
           onClicked: root.persistSettings({ showIcon: !on })
         }
+      }
+
+      Text {
+        text: "Entrance effect"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        width: parent.width
+        text: "Decorative glow when the terminal finishes entering; it never reports command status."
+        color: Util.alpha(root.contentForeground, 0.5)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      ButtonGroup {
+        width: parent.width
+        options: [
+          { value: "Off", label: "Off", tooltip: "Do not create an entrance-effect surface." },
+          { value: "Glow", label: "Glow", tooltip: "Show a brief decorative glow after the terminal settles." }
+        ]
+        value: root.entranceEffect
+        foreground: root.contentForeground
+        accent: Color.accent
+        fontFamily: root.contentFontFamily
+        onChanged: function(value) { root.setEntranceEffect(value) }
+      }
+
+      NumberField {
+        label: "Effect intensity (%)"
+        value: root.effectIntensity
+        from: 0
+        to: 100
+        stepSize: 10
+        fieldWidth: Style.space(120)
+        foreground: root.contentForeground
+        fontFamily: root.contentFontFamily
+        onModified: function(value) { root.setEffectIntensity(value) }
       }
 
       ConfirmDialog {

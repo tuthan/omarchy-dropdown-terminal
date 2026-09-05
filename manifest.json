@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.tuthan.dropdown-terminal",
   "name": "Dropdown Terminal",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "author": "Hung Vo",
   "license": "MIT",
   "description": "Summon the configured default terminal in a floating special workspace",
@@ -90,6 +90,24 @@
         "label": "Border color",
         "description": "Use theme to follow Omarchy, or a Hyprland color such as rgb(ff8800).",
         "defaultValue": "theme"
+      },
+      {
+        "key": "entranceEffect",
+        "type": "enum",
+        "label": "Entrance effect",
+        "options": ["Off", "Glow"],
+        "description": "Show a brief decorative glow after the terminal reaches its final position.",
+        "defaultValue": "Glow"
+      },
+      {
+        "key": "effectIntensity",
+        "type": "integer",
+        "label": "Effect intensity (%)",
+        "description": "Set the opacity and finite spark count of the entrance glow.",
+        "min": 0,
+        "max": 100,
+        "step": 10,
+        "defaultValue": 50
       }
     ]
   }
