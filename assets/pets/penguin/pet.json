@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "name": "Penguin",
+  "author": "OpenAI image generation tool",
+  "source": "Original asset generated for Dropdown Terminal on 2026-09-05; see SOURCE.",
+  "license": "MIT-compatible project asset; see LICENSE.",
+  "atlas": {
+    "path": "pet.png",
+    "frameWidth": 32,
+    "frameHeight": 32,
+    "columns": 8,
+    "rows": 8,
+    "renderScale": 1
+  },
+  "bar": {
+    "path": "bar.png",
+    "width": 20,
+    "height": 20
+  },
+  "actions": {
+    "peek": {
+      "frames": [0, 1],
+      "durations": [100, 110],
+      "loop": false,
+      "mirrorSafe": true,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "enter": {
+      "frames": [2, 3, 4],
+      "durations": [70, 80, 80],
+      "loop": false,
+      "mirrorSafe": true,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "land": {
+      "frames": [5, 6],
+      "durations": [80, 90],
+      "loop": false,
+      "mirrorSafe": true,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "idle": {
+      "frames": [16, 17, 18, 19],
+      "durations": [1400, 140, 1800, 140],
+      "loop": true,
+      "mirrorSafe": true,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "walk": {
+      "frames": [24, 25, 26, 27],
+      "durations": [110, 110, 110, 110],
+      "loop": true,
+      "mirrorSafe": true,
+      "anchors": [{"x": 28, "y": 30}, {"x": 28, "y": 30}, {"x": 28, "y": 30}, {"x": 28, "y": 30}]
+    },
+    "corner": {
+      "frames": [8, 9, 10, 11],
+      "durations": [90, 90, 90, 100],
+      "loop": false,
+      "mirrorSafe": false,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "climb": {
+      "frames": [12, 13, 14],
+      "durations": [140, 150, 140],
+      "loop": true,
+      "mirrorSafe": false,
+      "anchors": [{"x": 28, "y": 30}, {"x": 28, "y": 30}, {"x": 28, "y": 30}]
+    },
+    "dance": {
+      "frames": [40, 41, 42, 43],
+      "durations": [160, 160, 160, 160],
+      "loop": false,
+      "mirrorSafe": true,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "success": {
+      "frames": [44, 45, 46],
+      "durations": [180, 220, 220],
+      "loop": false,
+      "mirrorSafe": true,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "failure": {
+      "frames": [48, 49, 50],
+      "durations": [140, 140, 140],
+      "loop": false,
+      "mirrorSafe": false,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "exit": {
+      "frames": [56, 57, 58],
+      "durations": [70, 70, 70],
+      "loop": false,
+      "mirrorSafe": true,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "sleep": {
+      "frames": [60, 61, 62, 63],
+      "durations": [1800, 1000, 1800, 1000],
+      "loop": true,
+      "mirrorSafe": true,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    }
+  },
+  "fallbacks": {
+    "peek": "idle",
+    "enter": "idle",
+    "land": "idle",
+    "walk": "idle",
+    "corner": "idle",
+    "climb": "idle",
+    "dance": "idle",
+    "success": "idle",
+    "failure": "idle",
+    "exit": "idle",
+    "sleep": "idle"
+  }
+}

@@ -24,13 +24,33 @@ Panel {
   readonly property bool slideFromTop: root.setting("slideFromTop", true) !== false
   readonly property string entranceEffect: {
     var value = String(root.setting("entranceEffect", "Glow")).toLowerCase()
-    return value === "off" ? "Off" : "Glow"
+    var effects = {
+      "off": "Off",
+      "glow": "Glow",
+      "fire": "Fire",
+      "firework": "Firework",
+      "thunder": "Thunder",
+      "snow": "Snow",
+      "rain": "Rain"
+    }
+    return effects[value] || "Glow"
   }
   readonly property int effectIntensity: {
     var value = Number(root.setting("effectIntensity", 50))
     if (!isFinite(value)) value = 50
     return Math.max(0, Math.min(100, Math.round(value / 10) * 10))
   }
+  readonly property bool petEnabled: root.setting("petEnabled", false) === true
+  readonly property string petSpecies: {
+    var value = String(root.setting("petSpecies", "Penguin"))
+    return ["Penguin", "Cat", "Corgi"].indexOf(value) >= 0 ? value : "Penguin"
+  }
+  readonly property string petActivity: {
+    var value = String(root.setting("petActivity", "On focus"))
+    return ["On focus", "Always while visible", "Celebrations only"].indexOf(value) >= 0
+      ? value : "On focus"
+  }
+  readonly property bool reduceMotion: root.setting("reduceMotion", false) === true
   readonly property bool urgencyIndicator: root.setting("urgencyIndicator", true) !== false
   readonly property bool commandTracking: root.setting("commandTracking", false) === true
   readonly property int commandNotifyAfterMs: {
@@ -56,6 +76,8 @@ Panel {
   readonly property string integrationShell: String(root.shellStatusReport.shell || "bash")
   readonly property string shellConfigPath: String(root.shellStatusReport.config ||
     ((Quickshell.env("HOME") || "") + "/.bashrc"))
+  readonly property string petDiagnostic: root.hostWidget
+    ? String(root.hostWidget.petDiagnostic || "") : ""
   readonly property string shellBlock: String(root.shellStatusReport.block ||
     '# BEGIN Dropdown Terminal shell integration\nYADTM_EXISTING_DEBUG_TRAP="$(trap -p DEBUG 2>/dev/null || true)"\nYADTM_EXISTING_DEBUG_TRAP_CAPTURED=1\n[[ -r "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/bash.yadtm" ]] \\\n  && source "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/bash.yadtm"\nunset YADTM_EXISTING_DEBUG_TRAP YADTM_EXISTING_DEBUG_TRAP_CAPTURED\n# END Dropdown Terminal shell integration')
   readonly property bool shellStatusReady: root.hostWidget && root.hostWidget.shellStatusReady === true
@@ -199,16 +221,23 @@ Panel {
 
   function requestShellIntegrationChange(install) {
     root.shellPreflightInstall = install
-    if (root.hostWidget && typeof root.hostWidget.refreshShellIntegrationStatus === "function")
-      root.hostWidget.refreshShellIntegrationStatus()
-    if (root.hostWidget && root.hostWidget.shellStatusReady === false) {
-      root.shellPreflightWaiting = true
-      shellPreflightTimer.restart()
+    // The action buttons are gated by the last completed status read. Open
+    // the confirmation from that stable snapshot immediately; refreshing
+    // first used to clear shellStatusReady and leave the dialog waiting on a
+    // status process that could already be in flight.
+    if (install && !root.shellInstalled
+        && root.shellStatusReport.sourceReadable === true) {
+      root.beginConfirmation("shell-install")
       return
     }
-    if (install && root.shellInstalled) return
-    if (!install && !root.shellInstalled) return
-    root.beginConfirmation(install ? "shell-install" : "shell-remove")
+    if (!install && root.shellInstalled) {
+      root.beginConfirmation("shell-remove")
+      return
+    }
+    if (root.hostWidget && typeof root.hostWidget.refreshShellIntegrationStatus === "function")
+      root.hostWidget.refreshShellIntegrationStatus()
+    root.shellPreflightWaiting = true
+    shellPreflightTimer.restart()
   }
 
   Timer {
@@ -259,6 +288,9 @@ Panel {
   function setEffectIntensity(value) {
     persistSettings({ effectIntensity: Math.max(0, Math.min(100, Math.round(value / 10) * 10)) })
   }
+  function setPetEnabled(value) { persistSettings({ petEnabled: value }) }
+  function setPetActivity(value) { persistSettings({ petActivity: value }) }
+  function setReduceMotion(value) { persistSettings({ reduceMotion: value }) }
   function setUrgencyIndicator(value) { persistSettings({ urgencyIndicator: value }) }
   function setCommandTracking(value) { persistSettings({ commandTracking: value }) }
   function setCommandNotifyAfter(value) { persistSettings({ commandNotifyAfterMs: Math.round(value / 500) * 500 }) }
@@ -561,7 +593,7 @@ Panel {
 
       Text {
         width: parent.width
-        text: "Decorative glow when the terminal finishes entering; it never reports command status."
+        text: "A decorative finish when the terminal enters; it never reports command status."
         color: Util.alpha(root.contentForeground, 0.5)
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.caption
@@ -572,7 +604,12 @@ Panel {
         width: parent.width
         options: [
           { value: "Off", label: "Off", tooltip: "Do not create an entrance-effect surface." },
-          { value: "Glow", label: "Glow", tooltip: "Show a brief decorative glow after the terminal settles." }
+          { value: "Glow", label: "Glow", tooltip: "Show a brief decorative glow after the terminal settles." },
+          { value: "Fire", label: "Fire / burn", tooltip: "Show a warm flame-like burn around the terminal edge." },
+          { value: "Firework", label: "Firework", tooltip: "Show a short celebratory burst above the terminal." },
+          { value: "Thunder", label: "Thunder", tooltip: "Show a brief cool lightning flash." },
+          { value: "Snow", label: "Snow", tooltip: "Show a short snowfall across the terminal gutter." },
+          { value: "Rain", label: "Rain", tooltip: "Show a short rain streak effect across the terminal gutter." }
         ]
         value: root.entranceEffect
         foreground: root.contentForeground
@@ -591,6 +628,107 @@ Panel {
         foreground: root.contentForeground
         fontFamily: root.contentFontFamily
         onModified: function(value) { root.setEffectIntensity(value) }
+      }
+
+      PanelSeparator { width: parent.width }
+
+      Text {
+        text: "Pet"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        width: parent.width
+        text: "A decorative, click-through pet lives on the terminal edge. It never changes the meaning of the command indicator."
+        color: Util.alpha(root.contentForeground, 0.5)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Text {
+        width: parent.width
+        visible: root.petDiagnostic !== ""
+        text: root.petDiagnostic
+        color: Color.urgent
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        Button {
+          property bool on: root.petEnabled
+          text: (on ? "✓ " : "") + "Pet"
+          selected: on
+          tooltipText: on
+            ? "On: show the click-through pet while the terminal is visible."
+            : "Off: do not create the pet layer."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setPetEnabled(!on)
+        }
+        Button {
+          property bool on: root.reduceMotion
+          text: (on ? "✓ " : "") + "Reduce motion"
+          selected: on
+          tooltipText: on
+            ? "On: use static decorative states and stop all infinite animation."
+            : "Off: allow the authored pet and entrance motion."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setReduceMotion(!on)
+        }
+      }
+
+      Text {
+        text: "Pet species"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      ButtonGroup {
+        width: parent.width
+        options: [
+          { value: "Penguin", label: "Penguin", tooltip: "The bundled, validated penguin pack." },
+          { value: "Cat", label: "Fluffy cat", tooltip: "A bundled, validated fluffy cat pack." },
+          { value: "Corgi", label: "Corgi", tooltip: "A bundled, validated corgi pack." }
+        ]
+        value: root.petSpecies
+        foreground: root.contentForeground
+        accent: Color.accent
+        fontFamily: root.contentFontFamily
+        onChanged: function(value) { root.persistSettings({ petSpecies: value }) }
+      }
+
+      Text {
+        text: "Activity"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      ButtonGroup {
+        width: parent.width
+        options: [
+          { value: "On focus", label: "On focus", tooltip: "React to focus; otherwise remain quietly idle." },
+          { value: "Always while visible", label: "Always visible", tooltip: "Allow infrequent walking and sleep while visible." },
+          { value: "Celebrations only", label: "Celebrations", tooltip: "Only react to precise success and failure results." }
+        ]
+        value: root.petActivity
+        foreground: root.contentForeground
+        accent: Color.accent
+        fontFamily: root.contentFontFamily
+        onChanged: function(value) { root.setPetActivity(value) }
       }
 
       PanelSeparator { width: parent.width }

@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+
+# Validate a pet pack once, before QML is allowed to load its data. This is
+# intentionally a one-shot helper: it is never placed on a sprite frame path.
+set -u
+export LC_ALL=C
+
+usage() {
+  printf 'usage: %s validate PACK_DIR\n' "${0##*/}" >&2
+  exit 2
+}
+
+fail() {
+  jq -cn --arg reason "$1" '{valid:false, reason:$reason}'
+  exit 1
+}
+
+pass() {
+  jq -cn --arg pack "$1" '{valid:true, pack:$pack}'
+  exit 0
+}
+
+[[ "${1:-}" == "validate" ]] && shift
+pack_input="${1:-}"
+[[ -n "$pack_input" && -d "$pack_input" ]] || usage
+[[ ! -L "$pack_input" ]] || fail "pack directory is a symlink"
+
+pack_dir="$(realpath -e -- "$pack_input")" || fail "pack directory is not canonical"
+manifest="$pack_dir/pet.json"
+[[ -f "$manifest" && ! -L "$manifest" ]] || fail "pet.json is missing or a symlink"
+
+max_json=131072
+max_png=4194304
+max_total=8388608
+
+# Inspect the complete pack tree before reading any manifest-controlled path.
+# Symlinks, special files, and executable content are all rejected even when
+# they are not referenced by pet.json.
+pack_total=0
+while IFS= read -r -d '' entry; do
+  [[ ! -L "$entry" ]] || fail "pack contains a symlink"
+  if [[ -f "$entry" ]]; then
+    [[ ! -x "$entry" ]] || fail "pack contains executable content"
+    entry_size="$(stat -c '%s' -- "$entry" 2>/dev/null || printf 0)"
+    pack_total=$((pack_total + entry_size))
+  elif [[ ! -d "$entry" ]]; then
+    fail "pack contains a special file"
+  fi
+done < <(find -P "$pack_dir" -mindepth 1 -print0)
+(( pack_total <= max_total )) || fail "pack exceeds the total size limit"
+
+command -v identify >/dev/null 2>&1 || fail "PNG decoder identify is unavailable"
+
+manifest_size="$(stat -c '%s' -- "$manifest" 2>/dev/null || printf 0)"
+(( manifest_size <= max_json )) || fail "pet.json exceeds the size limit"
+
+json_ok=''
+if ! json_ok="$(jq -e '
+  def pathok:
+    type == "string" and length > 0 and length <= 128
+    and (startswith("/") | not) and (contains("..") | not)
+    and (test("[[:cntrl:]]") | not);
+  def intbetween($low; $high): type == "number" and . == floor and . >= $low and . <= $high;
+  def seqok:
+    type == "object"
+    and (.frames | type == "array" and length >= 1 and length <= 16)
+    and (.durations | type == "array")
+    and (.anchors | type == "array")
+    and (.frames | length) == (.durations | length)
+    and (.frames | length) == (.anchors | length)
+    and (.loop | type == "boolean")
+    and (.mirrorSafe | type == "boolean")
+    and all(.frames[]; intbetween(0; 63))
+    and all(.durations[]; intbetween(16; 4000))
+    and all(.anchors[]; type == "object" and (.x | type == "number" and . >= 0 and . <= 32)
+      and (.y | type == "number" and . >= 0 and . <= 32))
+    and (([.durations[]] | add) <= 12000 or .loop);
+  . as $root |
+  $root.version == 1
+  and ($root.name | type == "string" and length > 0 and length <= 128)
+  and all(["author", "source", "license"][]; $root[.] | type == "string" and length > 0 and length <= 256)
+  and ($root.atlas | type == "object")
+  and ($root.atlas.path | pathok)
+  and ($root.atlas.frameWidth | intbetween(32; 32))
+  and ($root.atlas.frameHeight | intbetween(32; 32))
+  and ($root.atlas.columns | intbetween(1; 8))
+  and ($root.atlas.rows | intbetween(1; 8))
+  and ($root.atlas.renderScale | intbetween(1; 4))
+  and (($root.atlas.columns * $root.atlas.rows) <= 64)
+  and ($root.bar | type == "object" and (.path | pathok)
+    and (.width | intbetween(1; 64)) and (.height | intbetween(1; 64)))
+  and ($root.actions | type == "object")
+  and all(["peek", "enter", "land", "idle", "walk", "corner", "climb", "dance", "success", "failure", "exit", "sleep"][];
+    $root.actions[.] | seqok)
+  and ($root.fallbacks | type == "object")
+  and all($root.fallbacks | to_entries[];
+    . as $entry | ($entry.value | type == "string")
+      and ($entry.value != $entry.key) and ($root.actions[$entry.value] != null))
+' "$manifest")"; then
+  fail "pet.json failed schema validation"
+fi
+
+relative_file() {
+  local relative="$1"
+  [[ "$relative" != /* && "$relative" != *..* && "$relative" != *$'\n'* && "$relative" != *$'\r'* ]] || fail "unsafe asset path"
+  local candidate="$pack_dir/$relative"
+  [[ -e "$candidate" && ! -L "$candidate" && -f "$candidate" ]] || fail "asset is missing, non-regular, or a symlink"
+  [[ ! -x "$candidate" ]] || fail "asset is executable"
+  local canonical
+  canonical="$(realpath -e -- "$candidate")" || fail "asset path is not canonical"
+  [[ "$canonical" == "$pack_dir"/* ]] || fail "asset escapes the pack directory"
+  printf '%s\n' "$canonical"
+}
+
+atlas_path="$(jq -r '.atlas.path' "$manifest")"
+bar_path="$(jq -r '.bar.path' "$manifest")"
+atlas_width="$(jq -r '.atlas.frameWidth * .atlas.columns' "$manifest")"
+atlas_height="$(jq -r '.atlas.frameHeight * .atlas.rows' "$manifest")"
+bar_width="$(jq -r '.bar.width' "$manifest")"
+bar_height="$(jq -r '.bar.height' "$manifest")"
+atlas="$(relative_file "$atlas_path")"
+bar="$(relative_file "$bar_path")"
+
+(( $(stat -c '%s' -- "$atlas") <= max_png )) || fail "atlas exceeds the size limit"
+(( $(stat -c '%s' -- "$bar") <= max_png )) || fail "bar icon exceeds the size limit"
+
+check_png() {
+  local file="$1"
+  local expected_width="$2"
+  local expected_height="$3"
+  local image_info
+  image_info="$(identify -quiet -format '%m %w %h' -- "$file" 2>/dev/null)" \
+    || fail "PNG cannot be decoded"
+  [[ "$image_info" == "PNG $expected_width $expected_height" ]] \
+    || fail "PNG dimensions do not match the manifest"
+}
+
+check_png "$atlas" "$atlas_width" "$atlas_height"
+check_png "$bar" "$bar_width" "$bar_height"
+pass "$pack_dir"

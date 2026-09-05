@@ -1,4 +1,4 @@
-# Phase 3: one pet pack
+# Phase 3: pet packs
 
 Ships an optional animated pet on the terminal's edge, and the master
 `reduceMotion` setting that both this phase and Phase 1 respect.
@@ -13,10 +13,10 @@ first candidate to drop if the earlier phases run long.
 
 ## Scope decision
 
-Ship **one** pet, penguin, with a fixed action contract. Cat and corgi packs are
-asset work against that contract, not code, and only become cheap once the
-contract is stable. Shipping three packs at once guarantees the contract is
-shaped by whichever sprite sheet was finished first.
+Ship three pets against one fixed action contract: penguin, fluffy cat, and
+corgi. The renderer and controller are species-agnostic; each pack is
+validated independently before its manifest is loaded. This keeps new pets
+cheap to add without allowing one sprite sheet to redefine the contract.
 
 Pet interaction — click, drag, feed — is explicitly out of scope. The overlay
 has an empty input region by construction (Phase 1.1), and that is what keeps
@@ -63,7 +63,7 @@ PetMotion.qml                                       perimeter projection and pat
 PetSprite.qml                                       atlas frames and timing
 PetEffects.qml                                      bounded dust/hearts/stars
 bin/omarchy-dropdown-terminal-pet-validate          one-shot external-pack validator
-assets/pets/penguin/
+assets/pets/{penguin,cat,corgi}/
   pet.json
   pet.png
   bar.png
@@ -176,13 +176,13 @@ that can actually cost battery:
 ### 3.5 Assets and licensing
 
 - Original or generated sprites, or assets with explicit redistribution terms.
-- `assets/pets/penguin/` carries a `LICENSE` and a `SOURCE` file recording
+- Each `assets/pets/<species>/` pack carries a `LICENSE` and a `SOURCE` file recording
   author, origin, and terms, beside the sheet.
 - The repository is MIT (`LICENSE`); a sprite sheet under incompatible terms
   cannot ship in-tree. Resolve licensing before drawing the state machine
   against a specific sheet's frame layout.
 
-The bundled pack is data and PNG images only. Use a fixed 32x32 transparent
+The bundled packs are data and PNG images only. Use a fixed 32x32 transparent
 canvas, at most eight frames per row, integer render scale, `smooth: false`, and
 `mipmap: false`. `bar.png` is separately authored for roughly 20 px display;
 do not shrink a detailed atlas frame and assume it remains readable.
@@ -217,7 +217,7 @@ One boolean, covering both phases:
 
 | Behavior | `reduceMotion: false` | `reduceMotion: true` |
 | --- | --- | --- |
-| Entrance effect | glow plus spark burst | static border accent, or nothing |
+| Entrance effect | selected finite finish plus particles | static border accent, or nothing |
 | Pet | full state machine | static sprite, or hidden |
 | Bar icon (Phase 2) | bounce / shake | colored dot only |
 | Infinite animation | idle actions run | none, anywhere |
@@ -303,22 +303,37 @@ hyprctl keyword monitor HEADLESS-2,1920x1080@60,3440x0,1.25
 
 ## Out of scope
 
-- Cat and corgi packs.
 - Any pet interaction: click, drag, feed, pet.
 - Pet persistence across shell reloads. The pet re-enters on the next summon;
   remembering where it was standing is not worth the state.
 
-After the penguin gate passes, a fluffy cat adds tail-idle/stretch/wall-climb
-frames and a corgi adds trot/short-hop/sploot/wiggle frames against the same
-manifest. If either needs species-specific QML conditionals, stop and revise
-the pack contract instead of branching on its ID.
+## Resolved implementation questions
 
-## Open questions
+- A single `Image` with one variable-duration `Timer` is used instead of
+  `SpriteSequence`/multiple animated sprites, because the fixed atlas contract
+  needs per-action frame lists and bounded timing in one place.
+- `reduceMotion` is plugin-local: the available Omarchy configuration exposes
+  no reliable global reduced-motion preference for this plugin to consume.
 
-- Does `SpriteSequence` handle per-action frame counts from a single sheet
-  cleanly enough to be worth it over several `AnimatedSprite` instances? Decide
-  against the actual sheet once licensing is settled.
-- Should `reduceMotion` read a system or Omarchy-wide preference if one exists,
-  rather than being plugin-local? Check for an Omarchy setting before adding a
-  plugin-only key; a user who set it globally will not expect to set it again
-  here.
+## Implementation record — 2026-09-06
+
+Phase 3 is implemented with three bundled, MIT-compatible generated packs:
+penguin, fluffy cat, and corgi. `TerminalEffects.qml` now coordinates the
+finite selectable entrance finishes (glow, fire/burn, firework, thunder, snow,
+and rain) and the
+long-lived pet surface, while `PetController.qml`, `PetMotion.qml`,
+`PetSprite.qml`, and `PetEffects.qml` keep state, perimeter projection, frame
+timing, and bounded effects separate. Finite actions restore the idle sprite,
+queued reactions drain after autonomous actions, and perimeter movement turns
+at exact edge boundaries before changing between walk and climb frames.
+Precise Phase 2 results are mapped from `succeeded`/`failed` to the pet's
+`success`/`failure` actions only when the completion event qualifies; generic
+urgency is never used.
+
+The species setting resolves only to validated bundled packs.
+`reduceMotion` remains plugin-local after checking the available Omarchy
+configuration for a reliable global preference. Bundled and hostile-pack
+fixtures are covered by a decoding validator with manifest-dimension checks,
+and atlas load errors are surfaced in the settings panel. Live
+multi-output, fractional-scale, input-pass-through, and CPU-idle checks still
+require an active Omarchy/Hyprland session.

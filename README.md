@@ -36,6 +36,8 @@ Omarchy. After making source changes, rerun the `rsync` command and
 `omarchy-shell shell rescanPlugins`.
 
 The helper requires `jq`, `hyprctl`, and the Omarchy `omarchy` command.
+The optional pet-pack validator also requires ImageMagick's `identify` decoder
+to verify PNG contents and manifest dimensions.
 
 ## Design and implementation rules
 
@@ -111,11 +113,27 @@ keeping the global shortcut and terminal service active.
 The **Bar icon** setting accepts a Nerd Font glyph or short text and shows a
 live preview in the settings panel. The default is the terminal glyph `\uF120`.
 
-The **Entrance effect** setting controls the decorative glow shown after the
-terminal finishes settling into place. **Off** unloads the effect surface;
-**Glow** is enabled by default. **Effect intensity** ranges from 0 to 100 in
-steps of 10. The effect is click-through, follows the terminal's output and
-corner radius, and does not represent command success, failure, or attention.
+The **Entrance effect** setting controls the decorative finish shown after the
+terminal settles into place. **Off** unloads the effect surface; **Glow** is
+enabled by default. The other finite treatments are **Fire / burn**,
+**Firework**, **Thunder**, **Snow**, and **Rain**. **Effect intensity** ranges
+from 0 to 100 in steps of 10. Every effect is click-through, follows the
+terminal's output and corner radius, and does not represent command success,
+failure, or attention.
+
+### Pets and reduced motion
+
+The pet is disabled by default. Choose the **Penguin**, **Fluffy cat**, or
+**Corgi** pack when enabling it. Each stays on the terminal edge and remains
+click-through; **On focus** permits focus reactions, **Always visible** also
+permits infrequent walking and sleep, and **Celebrations** limits it to
+qualifying precise command results from the explicit shell integration.
+Generic urgency never produces a success or failure pet reaction.
+
+**Reduce motion** holds the pet on a static pose, suppresses entrance particles,
+and changes the Phase 2 bar indicator to a colored dot. It is plugin-local
+because this host does not expose a reliable Omarchy-wide reduced-motion
+preference.
 
 ### Command completion indicator
 

@@ -28,6 +28,7 @@ Item {
   property string commandUnreadResult: ""
   property string commandLatestFinishKey: ""
   property string commandLatestResult: ""
+  property bool commandLatestQualifies: false
   property int commandLatestDurationMs: 0
   property int commandFlashUntil: 0
   property string commandFlashResult: ""
@@ -98,6 +99,17 @@ Item {
     }
   }
 
+  // Hyprland's object models update asynchronously after a special-workspace
+  // event. Re-probe once after the visibility property changes so the tracked
+  // client geometry is available to the decorative layer without mutating the
+  // dependency that is currently evaluating.
+  Timer {
+    id: terminalStateRefreshTimer
+    interval: 100
+    repeat: false
+    onTriggered: if (root.terminalVisible) root.refreshObservedState()
+  }
+
   // Omarchy documents that a FileView watch can stop delivering notifications
   // after a burst of appends. Probe only while a command is running, so idle
   // bars create neither a timer wakeup nor a journal read.
@@ -158,7 +170,16 @@ Item {
   readonly property string entranceEffect: {
     configRevision
     var value = String(setting("entranceEffect", "Glow")).toLowerCase()
-    return value === "off" ? "Off" : "Glow"
+    var effects = {
+      "off": "Off",
+      "glow": "Glow",
+      "fire": "Fire",
+      "firework": "Firework",
+      "thunder": "Thunder",
+      "snow": "Snow",
+      "rain": "Rain"
+    }
+    return effects[value] || "Glow"
   }
   readonly property int effectIntensity: {
     configRevision
@@ -166,6 +187,19 @@ Item {
     if (!isFinite(value)) value = 50
     return Math.max(0, Math.min(100, Math.round(value / 10) * 10))
   }
+  readonly property bool petEnabled: { configRevision; return setting("petEnabled", false) === true }
+  readonly property string petSpecies: {
+    configRevision
+    var value = String(setting("petSpecies", "Penguin"))
+    return ["Penguin", "Cat", "Corgi"].indexOf(value) >= 0 ? value : "Penguin"
+  }
+  readonly property string petActivity: {
+    configRevision
+    var value = String(setting("petActivity", "On focus"))
+    return ["On focus", "Always while visible", "Celebrations only"].indexOf(value) >= 0
+      ? value : "On focus"
+  }
+  readonly property bool reduceMotion: { configRevision; return setting("reduceMotion", false) === true }
   readonly property bool urgencyIndicator: { configRevision; return setting("urgencyIndicator", true) !== false }
   readonly property bool commandTracking: { configRevision; return setting("commandTracking", false) === true }
   readonly property int commandNotifyAfterMs: {
@@ -188,6 +222,7 @@ Item {
     root.commandUnreadResult = ""
     root.commandLatestFinishKey = ""
     root.commandLatestResult = ""
+    root.commandLatestQualifies = false
     root.commandLatestDurationMs = 0
     root.commandFlashUntil = 0
     root.commandFlashResult = ""
@@ -245,9 +280,12 @@ Item {
       result: result, durationMs: durationMs, status: status, qualifies: qualifies,
       lifecycle: root.eventTerminalState
     }
-    root.commandLatestFinishKey = key
     root.commandLatestResult = result
+    root.commandLatestQualifies = qualifies
     root.commandLatestDurationMs = durationMs
+    // Publish the key last: PetController observes this signal and must see
+    // the complete result tuple, not the previous event's payload.
+    root.commandLatestFinishKey = key
     if (qualifies && root.eventTerminalState === "hidden") {
       root.commandUnreadCount++
       root.commandUnreadResult = result
@@ -404,7 +442,7 @@ Item {
     if (!address || !Hyprland.toplevels) return null
     var toplevels = Hyprland.toplevels.values || []
     for (var i = 0; i < toplevels.length; i++) {
-      if (toplevels[i] && toplevels[i].address === address)
+      if (toplevels[i] && root.normalizedAddress(toplevels[i].address) === address)
         return toplevels[i]
     }
     return null
@@ -547,7 +585,12 @@ Item {
     root.resetCommandEvents()
     if (root.commandTracking) root.reloadCommandEvents()
   }
-  onTerminalVisibleChanged: if (root.terminalVisible) root.clearCommandUnread()
+  onTerminalVisibleChanged: {
+    if (root.terminalVisible) {
+      terminalStateRefreshTimer.restart()
+      root.clearCommandUnread()
+    }
+  }
   onTerminalFocusedChanged: if (root.terminalFocused) root.clearCommandUnread()
 
   onAllowSpecialFallthroughChanged: {
@@ -595,6 +638,7 @@ Item {
       if (name === "activespecial" || name === "activespecialv2"
           || name === "focusedmon" || name === "focusedmonv2") {
         root.refreshMonitors()
+        root.refreshToplevels()
       } else if (name === "openwindow") {
         if (!root.trackedAddress) root.refreshToplevels()
       } else if (name === "closewindow") {

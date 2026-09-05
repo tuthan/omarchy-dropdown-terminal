@@ -8,14 +8,17 @@ BarWidget {
   moduleName: "io.github.tuthan.dropdown-terminal"
 
   Service {
-    id: service
+    id: terminalService
     settings: root.settings
     moduleName: root.moduleName
   }
 
+  readonly property var service: terminalService
+
   readonly property bool showIcon: setting("showIcon", true) === true
   readonly property string icon: String(setting("icon", "\uF120"))
   readonly property string indicatorGlyph: {
+    if (service.reduceMotion && service.indicatorState !== "idle") return "•"
     if (service.indicatorState === "running") return "◌"
     if (service.indicatorState === "attention") return "!"
     if (service.indicatorState === "succeeded") return "✓"
@@ -121,16 +124,18 @@ BarWidget {
   readonly property var shellStatusReport: service.shellStatusReport
   readonly property bool shellStatusReady: service.shellStatusReady
   readonly property string shellActionMessage: service.shellActionMessage
+  readonly property string petDiagnostic: effectsLoader.item && effectsLoader.item.petDiagnostic
+    ? String(effectsLoader.item.petDiagnostic) : ""
 
   // BarWidget is instantiated once per output by Omarchy. The loader keeps
-  // the Off path genuinely absent: no PanelWindow, particle system, timers,
-  // or rounding probe exist when the user disables entrance effects.
+  // the fully-disabled path genuinely absent: no PanelWindow, particle
+  // system, timers, or rounding probe exist when both visual layers are off.
   Loader {
     id: effectsLoader
-    active: service.entranceEffect !== "Off"
+    active: service.entranceEffect !== "Off" || service.petEnabled
     sourceComponent: Component {
       TerminalEffects {
-        service: service
+        service: terminalService
         hostScreen: root.QsWindow.window ? root.QsWindow.window.screen : null
       }
     }

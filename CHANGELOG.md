@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add finite Fire / burn, Firework, Thunder, Snow, and Rain entrance effects,
+  plus original fluffy Cat and Corgi pet packs using the validated atlas
+  contract.
+- Complete phase 3 decorative pet support: a validated penguin pack, bounded
+  perimeter motion, click-through coordinator lifetime, precise completion
+  reactions, and shared reduced-motion behavior.
 - Complete phase 2 command completion indicators: generic Hyprland urgency,
   precise fork-free Bash/Zsh/Fish journal adapters, hidden-at-finish replay,
   scoped launch environment, and explicit reversible shell integration.

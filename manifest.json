@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.tuthan.dropdown-terminal",
   "name": "Dropdown Terminal",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "author": "Hung Vo",
   "license": "MIT",
   "description": "Summon the configured default terminal in a floating special workspace",
@@ -95,19 +95,49 @@
         "key": "entranceEffect",
         "type": "enum",
         "label": "Entrance effect",
-        "options": ["Off", "Glow"],
-        "description": "Show a brief decorative glow after the terminal reaches its final position.",
+        "options": ["Off", "Glow", "Fire", "Firework", "Thunder", "Snow", "Rain"],
+        "description": "Show a brief decorative finish after the terminal reaches its final position. Fire / burn, firework, thunder, snow, and rain are available.",
         "defaultValue": "Glow"
       },
       {
         "key": "effectIntensity",
         "type": "integer",
         "label": "Effect intensity (%)",
-        "description": "Set the opacity and finite spark count of the entrance glow.",
+        "description": "Set the opacity and bounded particle density of the selected entrance effect.",
         "min": 0,
         "max": 100,
         "step": 10,
         "defaultValue": 50
+      },
+      {
+        "key": "petEnabled",
+        "type": "boolean",
+        "label": "Pet",
+        "description": "Show a decorative pet on the terminal edge. The pet is click-through and never reports command status.",
+        "defaultValue": false
+      },
+      {
+        "key": "petSpecies",
+        "type": "enum",
+        "label": "Pet species",
+        "options": ["Penguin", "Cat", "Corgi"],
+        "description": "Choose the bundled penguin, fluffy cat, or corgi pack. Each uses the same validated action contract.",
+        "defaultValue": "Penguin"
+      },
+      {
+        "key": "petActivity",
+        "type": "enum",
+        "label": "Pet activity",
+        "options": ["On focus", "Always while visible", "Celebrations only"],
+        "description": "Choose when the selected pet may walk, sleep, or react while the terminal is visible.",
+        "defaultValue": "On focus"
+      },
+      {
+        "key": "reduceMotion",
+        "type": "boolean",
+        "label": "Reduce motion",
+        "description": "Disable infinite pet, entrance, and status-icon animation; the terminal remains fully usable.",
+        "defaultValue": false
       },
       {
         "key": "urgencyIndicator",
