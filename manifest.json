@@ -34,6 +34,13 @@
         "defaultValue": "\uF120"
       },
       {
+        "key": "keybinding",
+        "type": "string",
+        "label": "Global keybinding",
+        "description": "Hyprland key chord for toggling the terminal, for example CTRL + GRAVE or SUPER + SHIFT + T.",
+        "defaultValue": "CTRL + GRAVE"
+      },
+      {
         "key": "autoHideOnFocusLoss",
         "type": "boolean",
         "label": "Auto-hide on focus loss",

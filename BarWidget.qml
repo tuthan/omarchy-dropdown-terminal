@@ -18,6 +18,7 @@ BarWidget {
 
   readonly property bool showIcon: setting("showIcon", true) === true
   readonly property string icon: String(setting("icon", "\uF120"))
+  readonly property string keybinding: service.keybinding
   readonly property string indicatorGlyph: {
     if (service.reduceMotion && service.indicatorState !== "idle") return "•"
     if (service.indicatorState === "running") return "◌"
@@ -47,7 +48,7 @@ BarWidget {
         + (service.commandUnreadCount > 1 ? " (" + service.commandUnreadCount + " unread)" : "")
     if (service.commandTracking && !service.commandIntegrationInstalled)
       return "Dropdown Terminal · command tracking not configured; urgency remains available"
-    return "Left-click: terminal · Middle-click: settings · Right-click: bind Ctrl + Grave"
+    return "Left-click: terminal · Middle-click: settings · Right-click: bind " + root.keybinding
   }
 
   visible: !vertical && showIcon

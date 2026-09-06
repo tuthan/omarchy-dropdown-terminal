@@ -173,7 +173,10 @@ set_border_color() {
 
   window_lua="$(lua_string "address:$address")" || return 1
   if [[ "$border_color" == "theme" ]]; then
-    color_lua='"default"'
+    # -1 clears the per-window override and hands both border states back to
+    # Hyprland's active/inactive theme colors. "default" is not a color value
+    # for set_prop, so it silently leaves the terminal without its border.
+    color_lua='-1'
   else
     color_lua="$(lua_string "$border_color")" || return 1
   fi
@@ -492,9 +495,15 @@ hide_window() {
   # while the special is open elsewhere makes Hyprland migrate the whole
   # special workspace across screens, flashing the re-centered window.
   focus_window "$window_lua"
+  # Keep the workspace itself still while the window is moved upward. Without
+  # this matching suppression, specialWorkspaceOut runs its native animation
+  # after the window has already started leaving, making hide look unrelated to
+  # the configured Slide from top effect.
+  suppress_special_animation
   move_window "$window_lua" "$parked_y"
   wait_window_y "$address" "$parked_y" "$(move_animation_seconds)" || true
   hl_dispatch "hl.dsp.workspace.toggle_special(\"$special_workspace\")" >/dev/null
+  restore_special_animation
 }
 
 # True when the window intersects its owner monitor's rectangle rather than

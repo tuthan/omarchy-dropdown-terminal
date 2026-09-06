@@ -163,6 +163,11 @@ Item {
   readonly property int widthPercent: { configRevision; return Math.max(20, Math.min(100, Number(setting("widthPercent", 90)))) }
   readonly property int heightPercent: { configRevision; return Math.max(20, Math.min(100, Number(setting("heightPercent", 45)))) }
   readonly property string borderColor: { configRevision; return String(setting("borderColor", "theme")) }
+  readonly property string keybinding: {
+    configRevision
+    var value = String(setting("keybinding", "CTRL + GRAVE")).trim()
+    return value || "CTRL + GRAVE"
+  }
   readonly property bool slideFromTop: { configRevision; return setting("slideFromTop", true) !== false }
   // Manifest enum values are display strings and therefore part of the
   // persisted contract. Keep the runtime contract closed: an unknown value
@@ -724,6 +729,8 @@ Item {
     if (settingsReady) applySpecialFallthrough(allowSpecialFallthrough)
   }
 
+  onKeybindingChanged: if (settingsReady) refreshMutationStatus()
+
   Component.onCompleted: {
     runtimeStateRootProcess.running = true
     root.refreshObservedState()
@@ -836,7 +843,7 @@ Item {
   Process {
     id: bindProcess
     property bool allowConflict: false
-    command: ["bash", root.bindPath, allowConflict ? "install-force" : "install"]
+    command: ["bash", root.bindPath, allowConflict ? "install-force" : "install", root.keybinding]
     running: false
     onExited: {
       root.bindingStatusReady = false
@@ -847,7 +854,7 @@ Item {
 
   Process {
     id: bindStatusProcess
-    command: ["bash", root.bindPath, "status"]
+    command: ["bash", root.bindPath, "status", root.keybinding]
     stdout: StdioCollector { id: bindStatusOutput; waitForEnd: true }
     onExited: {
       var report = root.parseMutationStatus(bindStatusOutput.text)

@@ -70,7 +70,12 @@ Panel {
     (Quickshell.env("HOME") + "/.config")) + "/hypr"
   readonly property string bindingConfigPath: root.hyprConfigRoot + "/bindings.lua"
   readonly property string inputConfigPath: root.hyprConfigRoot + "/input.lua"
-  readonly property string bindingLine: 'hl.bind("CTRL + GRAVE", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))'
+  readonly property string keybinding: {
+    var value = String(root.setting("keybinding", "CTRL + GRAVE")).trim().replace(/\s+/g, " ")
+    return value || "CTRL + GRAVE"
+  }
+  readonly property string bindingLine: 'hl.bind("' + root.keybinding
+    + '", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))'
   readonly property string fallthroughBlock: '-- BEGIN Dropdown Terminal special fallthrough\nhl.config({\n  input = {\n    special_fallthrough = true,\n  },\n})\n-- END Dropdown Terminal special fallthrough'
   readonly property var shellStatusReport: root.hostWidget && root.hostWidget.shellStatusReport
     ? root.hostWidget.shellStatusReport : ({})
@@ -98,12 +103,13 @@ Panel {
       lines.push("Line " + String(conflict.lineNumber || "?") + ": " + String(conflict.text || ""))
     }
     if (conflicts.length > limit) lines.push("…and " + (conflicts.length - limit) + " more")
-    return "\n\nExisting Ctrl + Grave conflict(s):\n" + lines.join("\n")
+    return "\n\nExisting " + root.keybinding + " conflict(s):\n" + lines.join("\n")
       + "\nThe helper will add the managed binding only after this explicit confirmation."
   }
   readonly property string confirmMessage: {
     if (root.confirmKind === "binding")
-      return "Add the exact Ctrl + Grave binding?\n\nChord: CTRL + GRAVE\nTarget: " + root.bindingConfigPath
+      return "Add the exact " + root.keybinding + " binding?\n\nChord: " + root.keybinding
+        + "\nTarget: " + root.bindingConfigPath
         + "\nEffect: invokes io.github.tuthan.dropdown-terminal:toggle\nBackup: timestamped copy before atomic replacement\nRemoval: remove only the managed binding block."
         + root.bindingConflictSummary
     if (root.confirmKind === "fallthrough-enable")
@@ -166,6 +172,19 @@ Panel {
   function setWidth(value) { persistSettings({ widthPercent: Math.round(value) }) }
   function setHeight(value) { persistSettings({ heightPercent: Math.round(value) }) }
   function setAutoHide(value) { persistSettings({ autoHideOnFocusLoss: value }) }
+  function isKeybindingValid(value) {
+    var next = String(value || "").trim()
+    return next.length > 0 && next.length <= 80 && /^[A-Za-z0-9_:+, -]+$/.test(next)
+  }
+  function setKeybinding(value) {
+    var next = String(value || "").trim().replace(/\s+/g, " ")
+    if (!root.isKeybindingValid(next)) return false
+    if (next === root.keybinding) return true
+    persistSettings({ keybinding: next })
+    if (root.hostWidget && typeof root.hostWidget.refreshMutationStatus === "function")
+      root.hostWidget.refreshMutationStatus()
+    return true
+  }
   function setSettingsTab(value) {
     var next = value === "animation" ? "animation" : "general"
     if (root.settingsTab === next) return
@@ -369,7 +388,8 @@ Panel {
       Text {
         width: parent.width
         textFormat: Text.PlainText
-        text: "Binding: " + (root.hostWidget ? root.hostWidget.bindingStatus : "unavailable")
+        text: "Binding (" + root.keybinding + "): "
+          + (root.hostWidget ? root.hostWidget.bindingStatus : "unavailable")
           + (root.bindingConflictCount > 0 ? " (" + root.bindingConflictCount + " conflict(s))" : "")
           + " · Focus through: " + (root.hostWidget ? root.hostWidget.fallthroughStatus : "unavailable")
         color: Util.alpha(root.contentForeground, 0.55)
@@ -386,7 +406,7 @@ Panel {
         font.pixelSize: Style.font.caption
       }
 
-      ButtonGroup {
+      WrappedButtonGroup {
         id: settingsTabs
         width: parent.width
         options: [
@@ -423,41 +443,113 @@ Panel {
         font.pixelSize: Style.font.caption
       }
 
-      Row {
+      Column {
         width: parent.width
         spacing: Style.space(8)
         TextField {
           id: iconField
-          width: parent.width - applyIcon.width - iconPreview.width - parent.spacing * 2
+          width: parent.width
           text: String(root.setting("icon", "\uF120"))
           foreground: root.contentForeground
           font.family: root.contentFontFamily
           onAccepted: root.persistSettings({ icon: text || "\uF120" })
         }
+        Flow {
+          width: parent.width
+          height: childrenRect.height
+          spacing: Style.space(8)
+          Button {
+            id: applyIcon
+            text: "Apply"
+            tooltipText: "Apply this glyph to the bar button."
+            focusable: true
+            bordered: true
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+            onClicked: root.persistSettings({ icon: iconField.text || "\uF120" })
+          }
+          Text {
+            id: iconPreview
+            width: Style.space(28)
+            height: Style.space(32)
+            text: iconField.text || "\uF120"
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.title
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+          }
+        }
+      }
+
+      Text {
+        text: "Global keybinding"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        width: parent.width
+        text: "Choose the Hyprland chord used to toggle the terminal. Examples: CTRL + GRAVE or SUPER + SHIFT + T."
+        color: Util.alpha(root.contentForeground, 0.5)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      TextField {
+        id: keybindingField
+        width: parent.width
+        text: root.keybinding
+        foreground: root.contentForeground
+        font.family: root.contentFontFamily
+        onAccepted: root.setKeybinding(text)
+      }
+
+      Text {
+        width: parent.width
+        text: root.isKeybindingValid(keybindingField.text)
+          ? "Use letters, numbers, modifiers, +, commas, colons, underscores, and hyphens."
+          : "Enter a non-empty Hyprland key chord using only safe key names and separators."
+        color: root.isKeybindingValid(keybindingField.text)
+          ? Util.alpha(root.contentForeground, 0.5) : Color.urgent
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Flow {
+        width: parent.width
+        height: childrenRect.height
+        spacing: Style.space(8)
         Button {
-          id: applyIcon
-          text: "Apply"
-          tooltipText: "Apply this glyph to the bar button."
+          text: "Apply keybinding"
+          tooltipText: "Save this keybinding without installing it."
           focusable: true
           bordered: true
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
-          onClicked: root.persistSettings({ icon: iconField.text || "\uF120" })
+          onClicked: root.setKeybinding(keybindingField.text)
         }
-        Text {
-          id: iconPreview
-          width: Style.space(28)
-          text: iconField.text || "\uF120"
-          color: root.contentForeground
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.title
-          horizontalAlignment: Text.AlignHCenter
-          verticalAlignment: Text.AlignVCenter
+        Button {
+          text: root.hostWidget && root.hostWidget.bindingStatus === "installed"
+            ? "Binding installed" : "Install binding"
+          tooltipText: "Review conflicts, then install the managed binding in Hyprland."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          enabled: root.isKeybindingValid(keybindingField.text)
+          onClicked: {
+            if (root.setKeybinding(keybindingField.text)) root.requestBindingInstall()
+          }
         }
       }
 
-      Row {
+      Flow {
         width: parent.width
+        height: childrenRect.height
         spacing: Style.space(8)
         NumberField {
           label: "Width (%)"
@@ -506,8 +598,9 @@ Panel {
         font.pixelSize: Style.font.caption
       }
 
-      Row {
+      Flow {
         width: parent.width
+        height: childrenRect.height
         spacing: Style.space(8)
         Button {
           text: root.borderSetting === "theme" ? "✓ Theme" : "Theme"
@@ -539,8 +632,9 @@ Panel {
         }
       }
 
-      Row {
+      Flow {
         width: parent.width
+        height: childrenRect.height
         spacing: Style.space(8)
         Button {
           property bool on: root.setting("autoHideOnFocusLoss", false) === true
@@ -560,7 +654,6 @@ Panel {
           color: Util.alpha(root.contentForeground, 0.64)
           font.family: root.contentFontFamily
           font.pixelSize: Style.font.caption
-          anchors.verticalCenter: parent.verticalCenter
         }
         NumberField {
           label: ""
@@ -583,8 +676,9 @@ Panel {
         }
       }
 
-      Row {
+      Flow {
         width: parent.width
+        height: childrenRect.height
         spacing: Style.space(8)
         Button {
           property bool on: root.slideFromTop

@@ -112,10 +112,11 @@ hl.bind("CTRL + code:41", hl.dsp.global("io.github.tuthan.dropdown-terminal:togg
 
 The bar icon also provides shortcuts: left-click it to toggle the terminal,
 middle-click it to open the settings panel, or right-click it to review the
-default `Ctrl + Grave` binding. The cancel-first preflight names the exact
-chord, target, effect, backup, and removal path, and lists any existing
-`Ctrl + Grave` conflicts before offering an explicit “Add anyway” action; only
-confirmation performs the atomic edit and Hyprland reload.
+configured binding. The `General` tab lets you save a custom Hyprland chord,
+such as `SUPER + SHIFT + T`, and install it through the same explicit
+confirmation flow. The preflight names the exact chord, target, effect, backup,
+and removal path, and lists existing conflicts before offering an explicit “Add
+anyway” action; only confirmation performs the atomic edit and Hyprland reload.
 
 ## Configuration
 
@@ -138,6 +139,11 @@ keeping the global shortcut and terminal service active.
 
 The **Bar icon** setting accepts a Nerd Font glyph or short text and shows a
 live preview in the settings panel. The default is the terminal glyph `\uF120`.
+
+The **Global keybinding** setting controls the chord used by the optional
+binding installer. It defaults to `CTRL + GRAVE`; use a space-separated chord
+such as `SUPER + SHIFT + T` or `CTRL + code:41`, then choose **Install binding**
+to update the managed line in `~/.config/hypr/bindings.lua`.
 
 The **Entrance effect** setting controls the decorative finish shown after the
 terminal settles into place. **Off** unloads the effect surface; **Glow** is

@@ -4,38 +4,79 @@ set -u
 
 config="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua"
 config_dir="$(dirname -- "$config")"
-line='hl.bind("CTRL + GRAVE", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))'
+default_keybinding="CTRL + GRAVE"
+keybinding="${2:-$default_keybinding}"
 begin_marker="-- BEGIN Dropdown Terminal binding"
 end_marker="-- END Dropdown Terminal binding"
+
+# The value is inserted into a quoted Lua string. Keep the setting deliberately
+# small and syntax-free so this helper can never turn it into Lua code.
+valid_keybinding() {
+  local value="$1"
+  [[ -n "$value" && ${#value} -le 80 ]] || return 1
+  [[ "$value" =~ ^[A-Za-z0-9_:+,[:space:]-]+$ ]]
+}
+
+if ! valid_keybinding "$keybinding"; then
+  printf 'Dropdown Terminal: invalid keybinding: %s\n' "$keybinding" >&2
+  exit 2
+fi
+
+line="hl.bind(\"$keybinding\", hl.dsp.global(\"io.github.tuthan.dropdown-terminal:toggle\"))"
 
 status_json() {
   local installed=false conflicts='[]'
   [[ -f "$config" ]] && grep -Fqx -- "$line" "$config" && installed=true
   if [[ -f "$config" ]]; then
-    conflicts="$(jq -Rn --arg generated "$line" '
+    conflicts="$(jq -Rn --arg generated "$line" --arg requested "$keybinding" '
+      def canonical:
+        ascii_upcase
+        | gsub("[[:space:]]*[+,][[:space:]]*"; "+")
+        | gsub("[[:space:]]+"; "")
+        | gsub("GRAVE"; "CODE:41");
+      def binding_key:
+        if test("hl\\.bind\\(") then
+          (capture("hl\\.bind\\(\\\"(?<key>[^\\\"]*)\\\"").key)
+        elif test("^[[:space:]]*bind[[:space:]]*=") then
+          sub("^[[:space:]]*bind[[:space:]]*=[[:space:]]*"; "")
+          | split(",")
+          | if length >= 2 then .[0] + " + " + .[1] else "" end
+        else "" end;
       [inputs]
       | to_entries
       | map(select(.value != $generated
         and ((.value | test("^[[:space:]]*--")) | not)
-        and (.value | test("ctrl[[:space:]]*(\\+|,)[[:space:]]*(grave|code:41)"; "i"))))
+        and ((.value | binding_key | canonical) == ($requested | canonical))))
       | map({lineNumber: (.key + 1), text: .value})' < "$config" 2>/dev/null || printf '[]')"
   fi
-  jq -cn --arg config "$config" --arg line "$line" --argjson installed "$installed" \
+  jq -cn --arg config "$config" --arg line "$line" --arg keybinding "$keybinding" --argjson installed "$installed" \
     --argjson conflicts "$conflicts" \
     '{version: 1, available: true, supported: true, installed: $installed,
-      config: $config, line: $line, conflicts: $conflicts,
+      config: $config, keybinding: $keybinding, line: $line, conflicts: $conflicts,
       conflictCount: ($conflicts | length)}'
 }
 
-check_config_errors() {
+config_errors_json() {
   local errors
-  errors="$(hyprctl configerrors -j 2>/dev/null)" || return 0
-  jq -e 'type == "array" and length > 0' <<<"$errors" >/dev/null 2>&1 && return 1
-  return 0
+  errors="$(hyprctl configerrors -j 2>/dev/null)" || {
+    printf '[]\n'
+    return 0
+  }
+  jq -ce 'if type == "array" then . else error("not an array") end' <<<"$errors" 2>/dev/null || printf '[]\n'
+}
+
+# Hyprland retains parsing errors from before a reload. Only a newly reported
+# entry can be attributed to the binding edit; otherwise an unrelated warning
+# makes every custom keybinding look like it failed.
+check_config_errors() {
+  local before="$1" after="$2"
+  jq -ne --argjson before "$before" --argjson after "$after" \
+    '($after - $before | length) == 0' >/dev/null 2>&1
 }
 
 rewrite_config() {
-  local action="$1" temp mode="644"
+  local action="$1" temp mode="644" backup="" before_errors after_errors
+  before_errors="$(config_errors_json)"
   mkdir -p "$config_dir" || return 1
   [[ -f "$config" ]] && mode="$(stat -c '%a' "$config" 2>/dev/null || printf '644')"
   temp="$(mktemp "$config_dir/.bindings.lua.dropdown-terminal.XXXXXX")" || return 1
@@ -68,8 +109,15 @@ rewrite_config() {
     notify-send "Dropdown Terminal" "Binding saved; reload Hyprland manually" >/dev/null 2>&1 || true
     return 1
   fi
-  if ! check_config_errors; then
-    notify-send "Dropdown Terminal" "Hyprland reported a binding config error" >/dev/null 2>&1 || true
+  after_errors="$(config_errors_json)"
+  if ! check_config_errors "$before_errors" "$after_errors"; then
+    if [[ -n "$backup" ]]; then
+      cp -p "$backup" "$config" || true
+    else
+      rm -f "$config"
+    fi
+    hyprctl reload >/dev/null 2>&1 || true
+    notify-send "Dropdown Terminal" "Hyprland rejected the binding; changes were reverted" >/dev/null 2>&1 || true
     return 1
   fi
 }
@@ -130,15 +178,15 @@ case "$action" in
     acquire_mutation_lock || exit 1
     managed_structure_safe || exit 1
     if [[ -f "$config" ]] && grep -Fqx -- "$line" "$config"; then
-      notify-send "Dropdown Terminal" "Ctrl + Grave is already bound" >/dev/null 2>&1 || true
+      notify-send "Dropdown Terminal" "$keybinding is already bound" >/dev/null 2>&1 || true
       exit 0
     fi
     if [[ "$action" == "install" ]] && conflicts_present; then
-      notify-send "Dropdown Terminal" "Ctrl + Grave is already used; review the conflict before installing" >/dev/null 2>&1 || true
+      notify-send "Dropdown Terminal" "$keybinding is already used; review the conflict before installing" >/dev/null 2>&1 || true
       exit 1
     fi
     rewrite_config install || exit 1
-    notify-send "Dropdown Terminal" "Bound Ctrl + Grave" >/dev/null 2>&1 || true
+    notify-send "Dropdown Terminal" "Bound $keybinding" >/dev/null 2>&1 || true
     ;;
   remove)
     if [[ ! -f "$config" ]] || ! grep -Fq -- 'io.github.tuthan.dropdown-terminal:toggle' "$config"; then

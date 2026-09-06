@@ -43,6 +43,8 @@ assert_false() {
 
 fixture_clients="$fixture_dir/clients-single.json"
 fixture_monitors="$fixture_dir/monitors-dual-scaled.json"
+hypr_eval_log="$runtime_dir/hypr-eval.log"
+hypr_config_errors='[]'
 
 hyprctl() {
   case "$*" in
@@ -50,14 +52,16 @@ hyprctl() {
     'monitors -j') cat "$fixture_monitors" ;;
     '-j animations') cat "$fixture_dir/animations-omarchy.json" ;;
     'activewindow -j') printf '%s\n' '{"address":"0x1000"}' ;;
+    eval*) printf '%s\n' "$*" >> "$hypr_eval_log" ;;
     reload) return 0 ;;
-    'configerrors -j') printf '%s\n' '[]' ;;
+    'configerrors -j') printf '%s\n' "$hypr_config_errors" ;;
     *) return 1 ;;
   esac
 }
 notify-send() { :; }
 export -f hyprctl
 export -f notify-send
+export hypr_config_errors
 
 YADTM_LIB_ONLY=1 XDG_RUNTIME_DIR="$runtime_dir" source "$root_dir/bin/omarchy-dropdown-terminal"
 export fixture_clients fixture_monitors
@@ -76,6 +80,16 @@ assert_eq "workspace numeric" "3" "$(workspace_selector 3)"
 assert_eq "workspace named" "name:web" "$(workspace_selector web)"
 assert_eq "lua quote escaping" '"a\\b\"c"' "$(lua_string 'a\b"c')"
 assert_false "lua rejects control character" lua_string $'bad\nvalue'
+
+: > "$hypr_eval_log"
+border_color=theme
+set_border_color 0x1000
+assert_status "theme border clears active override" grep -Fq 'prop = "active_border_color", value = -1' "$hypr_eval_log"
+assert_status "theme border clears inactive override" grep -Fq 'prop = "inactive_border_color", value = -1' "$hypr_eval_log"
+: > "$hypr_eval_log"
+border_color='rgb(ff8800)'
+set_border_color 0x1000
+assert_status "custom border uses requested color" grep -Fq 'prop = "active_border_color", value = "rgb(ff8800)"' "$hypr_eval_log"
 
 assert_status "QML iterates toplevel object-model values" grep -Fq 'Hyprland.toplevels.values' "$root_dir/Service.qml"
 assert_status "QML iterates monitor object-model values" grep -Fq 'Hyprland.monitors.values' "$root_dir/Service.qml"
@@ -194,6 +208,12 @@ assert_status "settings exposes a general tab" grep -Fq 'label: "General"' "$roo
 assert_status "settings exposes an animation and pets tab" grep -Fq 'label: "Animation & pets"' "$root_dir/Panel.qml"
 assert_status "settings tabs reset the scroll position" grep -Fq 'contentScroll.contentY = 0' "$root_dir/Panel.qml"
 assert_status "tab pages collapse when inactive" grep -Fq 'height: visible ? implicitHeight : 0' "$root_dir/Panel.qml"
+assert_status "manifest exposes the custom keybinding" jq -e '.barWidget.schema | any(.[]; .key == "keybinding" and .defaultValue == "CTRL + GRAVE")' "$root_dir/manifest.json"
+assert_status "panel exposes keybinding controls" grep -Fq 'text: "Apply keybinding"' "$root_dir/Panel.qml"
+assert_status "general controls wrap to the panel width" grep -Fq 'height: childrenRect.height' "$root_dir/Panel.qml"
+assert_status "service passes the selected keybinding to the helper" grep -Fq 'root.keybinding]' "$root_dir/Service.qml"
+assert_status "binding helper validates custom keybindings" grep -Fq 'valid_keybinding()' "$root_dir/bin/omarchy-dropdown-terminal-bind"
+assert_status "hide suppresses the special-workspace out animation" bash -c 'grep -A25 -F "hide_window()" "$1" | grep -Fq "suppress_special_animation"' _ "$root_dir/bin/omarchy-dropdown-terminal"
 assert_false "bash adapter does not capture command text" grep -Fq 'BASH_COMMAND' "$root_dir/shell/bash.yadtm"
 assert_false "bash adapter has no prompt-path external date" grep -Fq 'date ' "$root_dir/shell/bash.yadtm"
 assert_false "fish adapter has no prompt-path external date" grep -Fq 'date ' "$root_dir/shell/fish.yadtm"
@@ -272,8 +292,9 @@ assert_eq "recovery keeps every special client" "2" "${#recovery_clients[@]}"
 
 fixture_clients="$fixture_dir/clients-hidden.json"
 assert_false "missing client ends wait" wait_window_y 0xdead 100 1
-
 fixture_clients="$fixture_dir/clients-single.json"
+assert_false "unreached client position ends wait" wait_window_y 0x1000 -500 0
+
 fixture_monitors="$fixture_dir/monitors-dual-scaled.json"
 rm -f "$state_file"
 status_output="$(YADTM_LIB_ONLY=0 XDG_RUNTIME_DIR="$runtime_dir" bash "$root_dir/bin/omarchy-dropdown-terminal" status)"
@@ -286,10 +307,25 @@ assert_status "status does not wait on the mutation lock" timeout 1 bash "$root_
 exec {lock_fd}>&-
 
 mutation_config_home="$runtime_dir/config"
+hypr_config_errors='["pre-existing config warning"]'
 XDG_CONFIG_HOME="$mutation_config_home" bash "$root_dir/bin/omarchy-dropdown-terminal-bind" install
 assert_status "binding helper read-back installed" bash -c 'XDG_CONFIG_HOME="$1" bash "$2" status | jq -e ".installed == true"' _ "$mutation_config_home" "$root_dir/bin/omarchy-dropdown-terminal-bind"
 XDG_CONFIG_HOME="$mutation_config_home" bash "$root_dir/bin/omarchy-dropdown-terminal-bind" remove
 assert_status "binding helper removal is idempotent" env XDG_CONFIG_HOME="$mutation_config_home" bash "$root_dir/bin/omarchy-dropdown-terminal-bind" remove
+hypr_config_errors='[]'
+
+custom_binding_home="$runtime_dir/custom-binding"
+mkdir -p "$custom_binding_home/hypr"
+printf '%s\n' 'bind = SUPER, T, exec, some-other-action' > "$custom_binding_home/hypr/bindings.lua"
+custom_binding_status="$(XDG_CONFIG_HOME="$custom_binding_home" bash "$root_dir/bin/omarchy-dropdown-terminal-bind" status 'SUPER + T')"
+assert_status "custom binding status reports conflicts" jq -e '.keybinding == "SUPER + T" and .conflictCount == 1 and .conflicts[0].lineNumber == 1' <<<"$custom_binding_status"
+assert_false "custom binding install refuses silent conflict" env XDG_CONFIG_HOME="$custom_binding_home" bash "$root_dir/bin/omarchy-dropdown-terminal-bind" install 'SUPER + T'
+XDG_CONFIG_HOME="$custom_binding_home" bash "$root_dir/bin/omarchy-dropdown-terminal-bind" install-force 'SUPER + T'
+assert_status "custom binding read-back installed" bash -c 'XDG_CONFIG_HOME="$1" bash "$2" status "SUPER + T" | jq -e ".installed == true"' _ "$custom_binding_home" "$root_dir/bin/omarchy-dropdown-terminal-bind"
+custom_binding_digest="$(sha256sum "$custom_binding_home/hypr/bindings.lua")"
+assert_false "binding helper rejects Lua injection" env XDG_CONFIG_HOME="$custom_binding_home" bash "$root_dir/bin/omarchy-dropdown-terminal-bind" install 'SUPER + T"; evil'
+assert_eq "invalid binding leaves config untouched" "$custom_binding_digest" "$(sha256sum "$custom_binding_home/hypr/bindings.lua")"
+
 XDG_CONFIG_HOME="$mutation_config_home" bash "$root_dir/bin/omarchy-dropdown-terminal-special-fallthrough" enable
 assert_status "fallthrough helper read-back installed" bash -c 'XDG_CONFIG_HOME="$1" bash "$2" status | jq -e ".installed == true"' _ "$mutation_config_home" "$root_dir/bin/omarchy-dropdown-terminal-special-fallthrough"
 fallthrough_file="$mutation_config_home/hypr/input.lua"
