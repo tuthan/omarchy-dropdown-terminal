@@ -14,6 +14,7 @@ BarWidget {
   }
 
   readonly property var service: terminalService
+  readonly property bool opened: settingsLoader.item && settingsLoader.item.opened === true
 
   readonly property bool showIcon: setting("showIcon", true) === true
   readonly property string icon: String(setting("icon", "\uF120"))
