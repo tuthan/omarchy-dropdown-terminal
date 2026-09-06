@@ -9,7 +9,8 @@ completion indicators.
 
 ## Video Demo
 
-https://github.com/user-attachments/assets/f9a374ee-0e1f-4f67-b7dd-a44dcc4f5207
+https://github.com/user-attachments/assets/e3437c1d-00c5-451e-b6e4-2c86dd82100a
+
 
 ## What's new in 2.0
 
