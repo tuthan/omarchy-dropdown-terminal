@@ -29,6 +29,8 @@ Item {
   property int generation: 0
   property int pendingGeneration: 0
   property int stableSamples: 0
+  property int stableGeometrySamples: 0
+  property bool geometryPollActive: false
   property double settleDeadline: 0
   property rect lastSettledRect: Qt.rect(0, 0, 0, 0)
   property real progress: 0
@@ -72,19 +74,24 @@ Item {
   readonly property int sparkWindowMs: 120 + Math.round((1 - intensity) * 50)
   readonly property real sparkSize: Math.max(Style.space(2), Style.space(3) + intensity * Style.space(2))
   readonly property real sparkSpeed: Style.space(28) + intensity * Style.space(34)
-  readonly property int variantParticleCount: root.isFire ? 14
+  readonly property int variantBaseCount: root.isFire ? 14
     : (root.isFirework ? 16 : (root.isSnow ? 18 : (root.isRain ? 16 : 0)))
+  readonly property bool effectEnabled: root.effectKind !== "Off" && root.intensity > 0
+    && !root.reducedMotion
+  readonly property int variantParticleCount: root.effectEnabled && root.variantBaseCount > 0
+    ? Math.max(1, Math.round(root.variantBaseCount * root.intensity)) : 0
   readonly property real variantOpacity: root.fadeProgress * intensity * 0.9
-  readonly property color warmColor: Qt.rgba(1, 0.24, 0.03, 1)
-  readonly property color flameColor: Qt.rgba(1, 0.72, 0.08, 1)
-  readonly property color iceColor: Qt.rgba(0.72, 0.9, 1, 1)
-  readonly property color rainColor: Qt.rgba(0.28, 0.62, 1, 1)
+  // Keep alternate palettes tied to Omarchy theme tokens instead of baking in
+  // hues that can clash with the active theme. effectColor still honors the
+  // user's explicit border-color choice for the shared outline.
+  readonly property color warmColor: Color.urgent
+  readonly property color flameColor: Color.accent
+  readonly property color iceColor: Color.foreground
+  readonly property color rainColor: Color.muted
   readonly property bool reducedMotion: service ? service.reduceMotion === true : false
   readonly property bool serviceTerminalVisible: root.service
     ? root.service.terminalVisible === true : false
-  readonly property bool petWantsSurface: !!petController && petController.active
-  readonly property bool surfaceActive: root.playing || root.petWantsSurface
-  readonly property string petDiagnostic: petController ? petController.assetDiagnostic : ""
+  readonly property bool surfaceActive: root.playing
 
   onServiceTerminalVisibleChanged: {
     root.observeTerminalVisibility()
@@ -127,6 +134,35 @@ Item {
   function sameRect(left, right) {
     return Math.abs(left.x - right.x) <= 1 && Math.abs(left.y - right.y) <= 1
       && Math.abs(left.width - right.width) <= 1 && Math.abs(left.height - right.height) <= 1
+  }
+
+  function restartGeometryObservation() {
+    if (!root.surfaceActive) return
+    root.geometryPollActive = true
+    root.stableGeometrySamples = 0
+    geometryTimer.interval = 250
+    geometryTimer.restart()
+  }
+
+  function pollGeometry() {
+    if (!root.service || !root.service.terminalVisible || !root.hostMatchesTerminal) {
+      root.settled = false
+      root.cancelEffect()
+      return
+    }
+    var generation = root.generation
+    var previous = root.terminalRect
+    root.service.refreshToplevels()
+    // The object model can publish a replacement on the next event-loop turn.
+    // Compare after that turn so unchanged samples do not keep the observation
+    // revision and overlay awake forever.
+    Qt.callLater(function() {
+      if (generation !== root.generation || !root.surfaceActive) return
+      var changed = !root.sameRect(previous, root.terminalRect)
+      root.stableGeometrySamples = changed ? 0 : root.stableGeometrySamples + 1
+      geometryTimer.interval = root.stableGeometrySamples >= 4 ? 1000 : 250
+      geometryTimer.restart()
+    })
   }
 
   function beginSettleWait() {
@@ -179,9 +215,8 @@ Item {
       return
     }
 
-    // This is a bounded, in-process model refresh. It is used only while a
-    // newly visible terminal is being claimed by a potential visual effect;
-    // the continuous 4 Hz refresh is armed only after the effect maps.
+    // This is a bounded, in-process model refresh used while a newly visible
+    // terminal is being claimed by a potential visual effect.
     root.service.refreshToplevels()
     var current = root.terminalRect
     if (!root.terminalGeometryValid) {
@@ -200,7 +235,7 @@ Item {
     if (stable && (!slideFromTop || atFinalPosition)) {
       root.waitingForSettle = false
       root.settled = true
-      if (root.service.entranceEffect !== "Off" && !root.reducedMotion)
+      if (root.effectEnabled)
         root.startEffect(token)
       else
         root.finishEffect(token)
@@ -213,7 +248,7 @@ Item {
     if (stable && Date.now() >= root.settleDeadline) {
       root.waitingForSettle = false
       root.settled = true
-      if (root.service.entranceEffect !== "Off" && !root.reducedMotion)
+      if (root.effectEnabled)
         root.startEffect(token)
       else
         root.finishEffect(token)
@@ -229,11 +264,12 @@ Item {
   function startEffect(token) {
     if (token !== root.generation || !root.settled || !root.terminalGeometryValid
         || !root.hostMatchesTerminal || !root.service.terminalVisible || root.reducedMotion
-        || root.service.entranceEffect === "Off") return
+        || !root.effectEnabled) return
     root.waitingForSettle = false
     settleTimer.stop()
     root.progress = 0
     root.playing = true
+    root.restartGeometryObservation()
     root.emitterArmed = root.sparkCount > 0
     root.loadRounding()
     particleSystem.reset()
@@ -246,6 +282,8 @@ Item {
     if (token !== root.generation) return
     progressAnimation.stop()
     root.playing = false
+    root.geometryPollActive = false
+    geometryTimer.stop()
     root.emitterArmed = false
     sparkStopTimer.stop()
     particleSystem.stop()
@@ -258,6 +296,8 @@ Item {
     root.pendingGeneration = root.generation
     root.waitingForSettle = false
     root.playing = false
+    root.geometryPollActive = false
+    geometryTimer.stop()
     root.emitterArmed = false
     settleTimer.stop()
     sparkStopTimer.stop()
@@ -282,6 +322,8 @@ Item {
     function onObservationRevisionChanged() {
       if (root.serviceTerminalVisible && !root.lastTerminalVisible)
         root.observeTerminalVisibility()
+      else if (root.surfaceActive)
+        root.restartGeometryObservation()
     }
     function onTerminalMonitorChanged() { root.observeTerminalMonitor() }
     function onEntranceEffectChanged() {
@@ -301,9 +343,14 @@ Item {
   Connections {
     target: Hyprland
     function onRawEvent(event) {
-      if (event && String(event.name || "") === "configreloaded") {
+      if (!event) return
+      var name = String(event.name || "")
+      if (name === "configreloaded") {
         root.roundingLoaded = false
         if (root.playing) root.loadRounding()
+      } else if (["movewindow", "movewindowv2", "resizewindow", "resizewindowv2",
+          "focusedmon", "focusedmonv2", "openwindow", "closewindow"].indexOf(name) >= 0) {
+        root.restartGeometryObservation()
       }
     }
   }
@@ -318,16 +365,9 @@ Item {
   Timer {
     id: geometryTimer
     interval: 250
-    repeat: true
-    running: root.surfaceActive
-    onTriggered: {
-      if (!root.service || !root.service.terminalVisible || !root.hostMatchesTerminal) {
-        root.settled = false
-        root.cancelEffect()
-        return
-      }
-      root.service.refreshToplevels()
-    }
+    repeat: false
+    running: root.geometryPollActive && root.surfaceActive
+    onTriggered: root.pollGeometry()
   }
 
   Timer {
@@ -373,15 +413,6 @@ Item {
     // The overlay is decorative. An empty region is what makes transparent
     // pixels and the visible outline click-through to the terminal below.
     mask: Region {}
-
-    PetController {
-      id: petController
-      anchors.fill: parent
-      z: 1
-      service: root.service
-      hostScreen: root.hostScreen
-      surfaceReady: root.settled && root.hostMatchesTerminal && root.terminalGeometryValid
-    }
 
     Item {
       id: effectBounds
@@ -430,14 +461,18 @@ Item {
       // text and input remain untouched while the visual language changes.
       Item {
         id: variantEffects
-        anchors.fill: parent
-        visible: root.playing && !root.reducedMotion
+        x: root.gutter
+        y: 0
+        width: root.terminalRect.width
+        height: root.gutter
+        clip: true
+        visible: root.playing && root.effectEnabled
 
         Rectangle {
           visible: root.isFire
-          x: root.gutter
+          x: 0
           y: root.gutter - Math.max(1, Style.space(2))
-          width: root.terminalRect.width
+          width: variantEffects.width
           height: Math.max(1, Style.space(2))
           color: root.warmColor
           opacity: root.variantOpacity * 0.8
@@ -450,7 +485,7 @@ Item {
             width: Style.space(2) + (index % 3) * Style.space(1)
             height: width * (1.6 + (index % 4) * 0.28)
             radius: width / 2
-            x: root.gutter * 0.25 + phase * (variantEffects.width - root.gutter * 0.5 - width)
+            x: phase * (variantEffects.width - width)
             y: root.gutter - height * 0.6
               - root.fadeProgress * (Style.space(8) + (index % 5) * Style.space(4))
             rotation: -26 + (index % 5) * 13
@@ -552,48 +587,58 @@ Item {
         }
       }
 
-      ParticleSystem {
-        id: particleSystem
-        anchors.fill: parent
-        running: root.playing && (root.effectKind === "Glow" || root.isFirework)
-        visible: root.playing && !root.reducedMotion
-          && (root.effectKind === "Glow" || root.isFirework)
+      Item {
+        id: particleGutter
+        x: root.gutter
+        y: 0
+        width: root.terminalRect.width
+        height: root.gutter
+        clip: true
 
-        Emitter {
-          id: emitter
-          // Emit only in the upper gutter so particles never cover terminal
-          // text. maximumEmitted and the stop timer make the burst finite.
-          x: 0
-          y: 0
-          width: parent.width
-          height: root.gutter
-          enabled: root.emitterArmed && !root.reducedMotion
+        ParticleSystem {
+          id: particleSystem
+          anchors.fill: parent
+          running: root.playing && root.effectEnabled
             && (root.effectKind === "Glow" || root.isFirework)
-          emitRate: root.sparkRate
-          maximumEmitted: root.sparkCount
-          lifeSpan: root.sparkLifeSpan
-          lifeSpanVariation: Math.round(root.sparkLifeSpan * 0.2)
-          size: root.sparkSize
-          endSize: 0
-          sizeVariation: root.sparkSize * 0.5
-          velocity: AngleDirection {
-            angle: 90
-            angleVariation: 180
-            magnitude: root.sparkSpeed
-            magnitudeVariation: root.sparkSpeed * 0.35
-          }
-        }
+          visible: root.playing && root.effectEnabled
+            && (root.effectKind === "Glow" || root.isFirework)
 
-        ItemParticle {
-          system: particleSystem
-          fade: true
-          delegate: Component {
-            Rectangle {
-              width: root.sparkSize
-              height: width
-              radius: width / 2
-              color: root.effectColor
-              opacity: root.coreOpacity
+          Emitter {
+            id: emitter
+            // Emit only in the upper gutter so particles never cover terminal
+            // text. maximumEmitted and the stop timer make the burst finite.
+            x: 0
+            y: 0
+            width: parent.width
+            height: parent.height
+            enabled: root.emitterArmed && !root.reducedMotion
+              && (root.effectKind === "Glow" || root.isFirework)
+            emitRate: root.sparkRate
+            maximumEmitted: root.sparkCount
+            lifeSpan: root.sparkLifeSpan
+            lifeSpanVariation: Math.round(root.sparkLifeSpan * 0.2)
+            size: root.sparkSize
+            endSize: 0
+            sizeVariation: root.sparkSize * 0.5
+            velocity: AngleDirection {
+              angle: 90
+              angleVariation: 180
+              magnitude: root.sparkSpeed
+              magnitudeVariation: root.sparkSpeed * 0.35
+            }
+          }
+
+          ItemParticle {
+            system: particleSystem
+            fade: true
+            delegate: Component {
+              Rectangle {
+                width: root.sparkSize
+                height: width
+                radius: width / 2
+                color: root.effectColor
+                opacity: root.coreOpacity
+              }
             }
           }
         }

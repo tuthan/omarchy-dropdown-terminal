@@ -16,6 +16,7 @@ end
 set -g _yadtm_seq 0
 set -g _yadtm_started 0
 set -g _yadtm_active_seq 0
+set -g _yadtm_event_writes 0
 
 function _yadtm_fish_preexec --on-event fish_preexec
     test $_yadtm_started -eq 0; or return 0
@@ -26,6 +27,13 @@ function _yadtm_fish_preexec --on-event fish_preexec
     # clock builtin. The zero timestamps are paired with the final field below
     # so the reducer can use Fish's builtin CMD_DURATION without spawning date.
     printf 'v1\tstart\t%s\t%s\t0\n' "$_yadtm_session" "$_yadtm_active_seq" >>"$YADTM_COMMAND_EVENTS" 2>/dev/null; or true
+    set -g _yadtm_event_writes (math $_yadtm_event_writes + 1)
+    if test $_yadtm_event_writes -ge 64
+        set -g _yadtm_event_writes 0
+        if set -q YADTM_EVENT_ROTATOR; and test -x "$YADTM_EVENT_ROTATOR"
+            "$YADTM_EVENT_ROTATOR" rotate-events >/dev/null 2>/dev/null
+        end
+    end
 end
 
 function _yadtm_fish_postexec --on-event fish_postexec

@@ -18,7 +18,7 @@ die() {
 }
 
 action="${1:-toggle}"
-[[ "$action" == "toggle" || "$action" == "hide" || "$action" == "cleanup" || "$action" == "status" || "$action" == "state-root" ]] || die "unknown action: $action"
+[[ "$action" == "toggle" || "$action" == "hide" || "$action" == "cleanup" || "$action" == "status" || "$action" == "state-root" || "$action" == "rotate-events" ]] || die "unknown action: $action"
 
 window_width_percent="${2:-90}"
 window_height_percent="${3:-45}"
@@ -88,12 +88,48 @@ animation_file="$state_root/io.github.tuthan.dropdown-terminal.special-animation
 legacy_animation_file="$state_root/special-animation"
 launch_file="$state_root/io.github.tuthan.dropdown-terminal.launch"
 event_file="$state_root/io.github.tuthan.dropdown-terminal.events"
+event_lock_file="$state_root/io.github.tuthan.dropdown-terminal.events.lock"
+event_max_bytes=262144
+event_keep_records=1024
 
 debug "action=$action"
 
 # Lifecycle events are written only after the corresponding compositor action
 # returns successfully. They are deliberately short, tab-separated facts:
 # command text never enters this journal, the state file, or debug output.
+rotate_event_file() {
+  local size temp
+
+  [[ -f "$event_file" ]] || return 0
+  size="$(stat -c '%s' -- "$event_file" 2>/dev/null || printf 0)"
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  (( size > event_max_bytes )) || return 0
+
+  # Rotate by complete records and publish atomically. The reducer notices the
+  # shorter file, resets its offset, and replays this bounded tail.
+  if ! exec 8>"$event_lock_file" 2>/dev/null; then return 1; fi
+  if ! flock -w 1 8 2>/dev/null; then
+    exec 8>&-
+    return 1
+  fi
+  size="$(stat -c '%s' -- "$event_file" 2>/dev/null || printf 0)"
+  if [[ "$size" =~ ^[0-9]+$ ]] && (( size > event_max_bytes )); then
+    temp="$(mktemp "$state_root/.io.github.tuthan.dropdown-terminal.events.XXXXXX")" || {
+      exec 8>&-
+      return 1
+    }
+    if tail -n "$event_keep_records" -- "$event_file" >"$temp"; then
+      chmod 600 "$temp" 2>/dev/null || true
+      mv -f -- "$temp" "$event_file" || { rm -f -- "$temp"; exec 8>&-; return 1; }
+    else
+      rm -f -- "$temp"
+      exec 8>&-
+      return 1
+    fi
+  fi
+  exec 8>&-
+}
+
 record_lifecycle() {
   local phase="$1" address="$2" transition_id timestamp
   case "$phase" in
@@ -101,6 +137,7 @@ record_lifecycle() {
     *) return 1 ;;
   esac
   is_client_address "$address" || return 1
+  rotate_event_file || true
   transition_id="helper-${BASHPID:-$$}-${EPOCHREALTIME:-0}"
   timestamp="${EPOCHREALTIME:-0}"
   printf 'v1\t%s\thelper\t%s\t%s\t%s\n' "$phase" "$transition_id" "$timestamp" "$address" \
@@ -882,6 +919,11 @@ if [[ "$action" == "status" ]]; then
   exit 0
 fi
 
+if [[ "$action" == "rotate-events" ]]; then
+  rotate_event_file
+  exit $?
+fi
+
 # Serialize every mutating invocation behind one lock: overlapping runs would
 # otherwise snapshot the animation config mid-suppression and later restore
 # the suppressed values. Toggle is a drop-on-duplicate action; reconciliation
@@ -1064,6 +1106,7 @@ if (( ! pending_launch )); then
   # holding the lock.
   terminal_session="helper-${BASHPID:-$$}-${EPOCHREALTIME:-0}-${RANDOM}"
   YADTM_TERMINAL=1 YADTM_COMMAND_EVENTS="$event_file" \
+    YADTM_EVENT_ROTATOR="${BASH_SOURCE[0]}" \
     YADTM_TERMINAL_SESSION="$terminal_session" \
     omarchy launch terminal >/dev/null 2>&1 9>&- &
   launch_pid="$!"

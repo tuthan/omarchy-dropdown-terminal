@@ -33,6 +33,8 @@ Item {
   readonly property int columns: root.pack && root.pack.atlas ? Number(root.pack.atlas.columns) : 8
   readonly property int rows: root.pack && root.pack.atlas ? Number(root.pack.atlas.rows) : 8
   readonly property int renderScale: root.pack && root.pack.atlas ? Number(root.pack.atlas.renderScale) : 1
+  readonly property int atlasWidth: root.frameWidth * root.columns
+  readonly property int atlasHeight: root.frameHeight * root.rows
   readonly property int frameIndex: root.activeSequence && root.activeSequence.frames
     && root.activeSequence.frames.length > 0
     ? Number(root.activeSequence.frames[Math.min(root.frameCursor, root.activeSequence.frames.length - 1)]) : 0
@@ -71,7 +73,7 @@ Item {
       && Number(anchor.y) >= 0 && Number(anchor.y) <= root.frameHeight
   }
 
-  function validSequence(sequence) {
+  function validSequence(sequence, cellCount) {
     if (!sequence || !Array.isArray(sequence.frames) || !Array.isArray(sequence.durations)
         || !Array.isArray(sequence.anchors) || sequence.frames.length === 0
         || sequence.frames.length > 16 || sequence.frames.length !== sequence.durations.length
@@ -79,7 +81,7 @@ Item {
         || typeof sequence.mirrorSafe !== "boolean")
       return false
     for (var i = 0; i < sequence.frames.length; i++) {
-      if (!boundedInteger(sequence.frames[i], 0, root.rows * root.columns - 1)
+      if (!boundedInteger(sequence.frames[i], 0, cellCount - 1)
           || !boundedInteger(sequence.durations[i], 16, 4000)
           || !validAnchor(sequence.anchors[i])) return false
     }
@@ -98,8 +100,9 @@ Item {
     if (atlas.columns * atlas.rows > 64) return false
     var required = ["peek", "enter", "land", "idle", "walk", "corner", "climb",
       "dance", "success", "failure", "exit", "sleep"]
+    var cellCount = atlas.columns * atlas.rows
     for (var i = 0; i < required.length; i++) {
-      if (!validSequence(candidate.actions[required[i]])) return false
+      if (!validSequence(candidate.actions[required[i]], cellCount)) return false
     }
     if (!candidate.fallbacks || typeof candidate.fallbacks !== "object") return false
     for (var name in candidate.fallbacks) {
@@ -141,11 +144,11 @@ Item {
 
   function observeAtlasStatus() {
     if (!root.manifestReady) return
-    if (atlasProbe.status === Image.Ready) {
+    if (atlas.status === Image.Ready) {
       var expectedWidth = root.frameWidth * root.columns
       var expectedHeight = root.frameHeight * root.rows
-      var actualWidth = Number(atlasProbe.sourceSize.width)
-      var actualHeight = Number(atlasProbe.sourceSize.height)
+      var actualWidth = Number(atlas.sourceSize.width)
+      var actualHeight = Number(atlas.sourceSize.height)
       if (actualWidth !== expectedWidth || actualHeight !== expectedHeight) {
         root.assetReady = false
         root.assetDiagnostic = root.species + " pack unavailable: atlas dimensions do not match (got "
@@ -158,7 +161,7 @@ Item {
         root.assetReady = true
         root.assetDiagnostic = ""
       }
-    } else if (atlasProbe.status === Image.Error || atlas.status === Image.Error) {
+    } else if (atlas.status === Image.Error) {
       root.assetReady = false
       root.assetDiagnostic = root.species + " pack unavailable: atlas could not be loaded"
     } else {
@@ -206,32 +209,33 @@ Item {
     onTriggered: root.advanceFrame()
   }
 
-  Image {
-    id: atlas
-    anchors.left: parent.left
-    anchors.top: parent.top
+  // Decode the atlas once, then move the full texture behind this clipped
+  // viewport. Changing the source clip on every frame makes Qt reload and
+  // potentially decode the PNG repeatedly.
+  Item {
+    id: frameViewport
     width: root.frameWidth * root.renderScale
     height: root.frameHeight * root.renderScale
-    visible: root.assetReady
-    source: root.atlasPath
-    sourceClipRect: root.frameRect
-    fillMode: Image.Stretch
-    mirror: root.mirrorFrame && !!(root.activeSequence && root.activeSequence.mirrorSafe)
-    smooth: false
-    mipmap: false
-    asynchronous: true
-    onStatusChanged: root.observeAtlasStatus()
-  }
+    clip: true
 
-  // sourceClipRect intentionally makes the renderer report one frame's size.
-  // Keep a second, invisible decoder for validating the complete atlas.
-  Image {
-    id: atlasProbe
-    source: root.atlasPath
-    asynchronous: true
-    visible: false
-    onStatusChanged: root.observeAtlasStatus()
-    onSourceSizeChanged: root.observeAtlasStatus()
+    Image {
+      id: atlas
+      width: root.atlasWidth * root.renderScale
+      height: root.atlasHeight * root.renderScale
+      x: root.mirrorFrame && !!(root.activeSequence && root.activeSequence.mirrorSafe)
+        ? -(root.atlasWidth - root.frameRect.x - root.frameWidth) * root.renderScale
+        : -root.frameRect.x * root.renderScale
+      y: -root.frameRect.y * root.renderScale
+      visible: root.assetReady
+      source: root.atlasPath
+      fillMode: Image.Stretch
+      mirror: root.mirrorFrame && !!(root.activeSequence && root.activeSequence.mirrorSafe)
+      smooth: false
+      mipmap: false
+      asynchronous: true
+      onStatusChanged: root.observeAtlasStatus()
+      onSourceSizeChanged: root.observeAtlasStatus()
+    }
   }
 
   onActionNameChanged: root.restartSequence()

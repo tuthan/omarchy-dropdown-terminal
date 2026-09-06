@@ -21,7 +21,8 @@ Item {
   property int eventProcessedOffset: 0
   property string eventIncompleteTail: ""
   property bool eventReplayReady: false
-  property var commandSessions: ({})
+  property int eventRecordCount: 0
+  property var commandSessions: Object.create(null)
   property string eventTerminalState: "closed"
   property int eventMalformedRecords: 0
   property int commandUnreadCount: 0
@@ -215,7 +216,8 @@ Item {
     root.eventProcessedOffset = 0
     root.eventIncompleteTail = ""
     root.eventReplayReady = false
-    root.commandSessions = ({})
+    root.eventRecordCount = 0
+    root.commandSessions = Object.create(null)
     root.eventTerminalState = "closed"
     root.eventMalformedRecords = 0
     root.commandUnreadCount = 0
@@ -228,6 +230,47 @@ Item {
     root.commandFlashResult = ""
     root.commandDismissedFinishKey = ""
     root.commandRevision++
+  }
+
+  function newRecordMap() {
+    return Object.create(null)
+  }
+
+  function pruneSession(sessionId, session) {
+    if (!session || !session.starts || !session.commands) return
+
+    var commandKeys = Object.keys(session.commands)
+    while (commandKeys.length > root.maxSessionRecords) {
+      var completedKey = commandKeys.shift()
+      delete session.commands[completedKey]
+      var completedFields = completedKey.split("\t")
+      if (completedFields.length === 2) delete session.starts[completedFields[1]]
+    }
+
+    var startKeys = Object.keys(session.starts)
+    while (startKeys.length > root.maxSessionRecords) {
+      var oldestSequence = startKeys.shift()
+      delete session.starts[oldestSequence]
+      delete session.commands[sessionId + "\t" + oldestSequence]
+    }
+  }
+
+  function pruneSessions() {
+    var sessionIds = Object.keys(root.commandSessions)
+    if (sessionIds.length <= root.maxCommandSessions) return
+
+    // Completed sessions are disposable first. Active sessions are retained
+    // until the hard cap is reached so commandRunning remains useful.
+    for (var i = 0; i < sessionIds.length && sessionIds.length > root.maxCommandSessions; i++) {
+      var candidate = root.commandSessions[sessionIds[i]]
+      if (!candidate || !candidate.starts || Object.keys(candidate.starts).length === 0) {
+        delete root.commandSessions[sessionIds[i]]
+        sessionIds.splice(i, 1)
+        i--
+      }
+    }
+    while (sessionIds.length > root.maxCommandSessions)
+      delete root.commandSessions[sessionIds.shift()]
   }
 
   function validEventSession(value) {
@@ -280,6 +323,8 @@ Item {
       result: result, durationMs: durationMs, status: status, qualifies: qualifies,
       lifecycle: root.eventTerminalState
     }
+    root.pruneSession(sessionId, session)
+    root.pruneSessions()
     root.commandLatestResult = result
     root.commandLatestQualifies = qualifies
     root.commandLatestDurationMs = durationMs
@@ -306,10 +351,12 @@ Item {
         || !isFinite(timestamp)) return false
     var sessions = root.commandSessions
     var session = sessions[sessionId]
-    if (!session) session = { starts: ({}), commands: ({}) }
+    if (!session) session = { starts: root.newRecordMap(), commands: root.newRecordMap() }
     session.starts[sequence] = { timestamp: timestamp }
+    root.pruneSession(sessionId, session)
     sessions[sessionId] = session
     root.commandSessions = sessions
+    root.pruneSessions()
     return true
   }
 
@@ -328,15 +375,21 @@ Item {
       // otherwise a replay would keep the command indicator and reload timer
       // permanently in the running state after the terminal is reopened.
       var sessions = root.commandSessions
-      for (var sessionId in sessions) {
+      var sessionIds = Object.keys(sessions)
+      for (var i = 0; i < sessionIds.length; i++) {
+        var sessionId = sessionIds[i]
         var session = sessions[sessionId]
         if (!session || !session.starts) continue
-        for (var sequence in session.starts) {
+        var sequences = Object.keys(session.starts)
+        for (var j = 0; j < sequences.length; j++) {
+          var sequence = sequences[j]
           var key = sessionId + "\t" + sequence
           if (!session.commands || !session.commands[key]) delete session.starts[sequence]
         }
+        root.pruneSession(sessionId, session)
       }
       root.commandSessions = sessions
+      root.pruneSessions()
     }
     if (phase === "shown" || phase === "closed") {
       root.commandUnreadCount = 0
@@ -348,20 +401,38 @@ Item {
 
   function applyEventLine(line, allowTransient) {
     if (!line) return true
-    var fields = line.split("\t")
-    if (fields[0] !== "v1") return false
-    if (fields[1] === "start") return root.applyCommandStart(fields)
-    if (fields[1] === "finish") return root.applyCommandFinish(fields, allowTransient)
-    if (fields[1] === "shown" || fields[1] === "hidden" || fields[1] === "closed")
-      return root.applyLifecycle(fields)
-    return false
+    // A malformed record must not abort replay of the remaining journal. Keep
+    // the line bounded as well: the shell contract has no field large enough
+    // to justify allocating arbitrary input here.
+    if (line.length > 512) return false
+    try {
+      var fields = line.split("\t")
+      if (fields[0] !== "v1") return false
+      if (fields[1] === "start") return root.applyCommandStart(fields)
+      if (fields[1] === "finish") return root.applyCommandFinish(fields, allowTransient)
+      if (fields[1] === "shown" || fields[1] === "hidden" || fields[1] === "closed")
+        return root.applyLifecycle(fields)
+      return false
+    } catch (e) {
+      root.logDebug("event record rejected")
+      return false
+    }
   }
 
   function consumeEventText(raw, fileLoadComplete) {
-    var text = String(raw || "")
-    if (text.length < root.eventProcessedOffset) root.resetCommandEvents()
-    var allowTransient = root.eventReplayReady
-    var added = text.substring(root.eventProcessedOffset)
+    var fullText = String(raw || "")
+    var rebuilding = fullText.length < root.eventProcessedOffset || fullText.length > root.maxEventBytes
+    var text = fullText
+    if (rebuilding) {
+      root.resetCommandEvents()
+      if (fullText.length > root.maxEventBytes) {
+        var cutoff = fullText.length - root.maxEventBytes
+        var boundary = fullText.indexOf("\n", cutoff)
+        text = boundary >= 0 ? fullText.substring(boundary + 1) : ""
+      }
+    }
+    var allowTransient = root.eventReplayReady && !rebuilding
+    var added = rebuilding ? text : text.substring(root.eventProcessedOffset)
     var combined = root.eventIncompleteTail + added
     var hasTrailingNewline = combined.endsWith("\n")
     var lines = combined.split("\n")
@@ -371,12 +442,20 @@ Item {
     } else {
       root.eventIncompleteTail = lines.pop() || ""
     }
+    if (lines.length > root.maxEventRecords) {
+      root.resetCommandEvents()
+      lines = lines.slice(-root.maxEventRecords)
+      allowTransient = false
+    }
     var malformed = 0
     for (var i = 0; i < lines.length; i++) {
       if (!root.applyEventLine(lines[i], allowTransient)) malformed++
     }
-    root.eventMalformedRecords += malformed
-    root.eventProcessedOffset = text.length
+    root.eventMalformedRecords = Math.min(root.maxEventRecords,
+      root.eventMalformedRecords + malformed)
+    root.eventRecordCount = Math.min(root.maxEventRecords,
+      root.eventRecordCount + lines.length)
+    root.eventProcessedOffset = fullText.length
     // The first completed FileView load is the replay baseline. The fallback
     // nudge may see an empty stale value while reload() is still async, so it
     // only establishes the baseline once text is present.
@@ -519,20 +598,63 @@ Item {
     return toplevel && toplevel.monitor ? toplevel.monitor : null
   }
 
+  function normalizedSnapshotNumber(value) {
+    var number = Number(value)
+    return isFinite(number) ? String(Math.round(number * 100) / 100) : "?"
+  }
+
+  function toplevelGeometrySnapshot() {
+    var address = root.trackedAddress
+    if (!address || !Hyprland.toplevels) return "none"
+    var toplevels = Hyprland.toplevels.values || []
+    for (var i = 0; i < toplevels.length; i++) {
+      var toplevel = toplevels[i]
+      if (!toplevel || root.normalizedAddress(toplevel.address) !== address) continue
+      var ipc = toplevel.lastIpcObject
+      if (!ipc || !ipc.at || !ipc.size) return address + "|missing"
+      var monitorName = toplevel.monitor ? String(toplevel.monitor.name || "") : ""
+      return [address, monitorName, root.normalizedSnapshotNumber(ipc.at[0]),
+        root.normalizedSnapshotNumber(ipc.at[1]), root.normalizedSnapshotNumber(ipc.size[0]),
+        root.normalizedSnapshotNumber(ipc.size[1])].join("|")
+    }
+    return address + "|unresolved"
+  }
+
+  function monitorSnapshot() {
+    var monitors = Hyprland.monitors ? (Hyprland.monitors.values || []) : []
+    var values = []
+    for (var i = 0; i < monitors.length; i++) {
+      var monitor = monitors[i]
+      if (!monitor) continue
+      var ipc = monitor.lastIpcObject || {}
+      var special = ipc.specialWorkspace || {}
+      values.push([String(monitor.name || ""), String(special.name || ""),
+        root.normalizedSnapshotNumber(monitor.x), root.normalizedSnapshotNumber(monitor.y),
+        monitor.focused === true ? "1" : "0"].join("|"))
+    }
+    values.sort()
+    return values.join(";")
+  }
+
   function refreshToplevels() {
+    var before = root.toplevelGeometrySnapshot()
     if (typeof Hyprland.refreshToplevels === "function") Hyprland.refreshToplevels()
-    observationRevision++
+    if (before !== root.toplevelGeometrySnapshot()) observationRevision++
   }
 
   function refreshMonitors() {
+    var before = root.monitorSnapshot()
     if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
-    observationRevision++
+    if (before !== root.monitorSnapshot()) observationRevision++
   }
 
   function refreshObservedState() {
-    refreshToplevels()
-    refreshMonitors()
-    observationRevision++
+    var beforeToplevels = root.toplevelGeometrySnapshot()
+    var beforeMonitors = root.monitorSnapshot()
+    if (typeof Hyprland.refreshToplevels === "function") Hyprland.refreshToplevels()
+    if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
+    if (beforeToplevels !== root.toplevelGeometrySnapshot()
+        || beforeMonitors !== root.monitorSnapshot()) observationRevision++
   }
 
   readonly property string helperPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal").toString().replace(/^file:\/\//, "")
@@ -573,6 +695,11 @@ Item {
   property bool shellStatusReady: false
   property string shellMutationAction: ""
   property string shellActionMessage: ""
+
+  readonly property int maxEventBytes: 262144
+  readonly property int maxEventRecords: 2048
+  readonly property int maxCommandSessions: 64
+  readonly property int maxSessionRecords: 128
 
   readonly property bool commandIntegrationInstalled: {
     shellStatusRevision

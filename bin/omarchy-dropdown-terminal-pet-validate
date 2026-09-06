@@ -26,12 +26,25 @@ pack_input="${1:-}"
 [[ ! -L "$pack_input" ]] || fail "pack directory is a symlink"
 
 pack_dir="$(realpath -e -- "$pack_input")" || fail "pack directory is not canonical"
+[[ -O "$pack_dir" ]] || fail "pack directory is not owned by the current user"
+pack_mode="$(stat -c '%a' -- "$pack_dir" 2>/dev/null || printf 0)"
+[[ "$pack_mode" =~ ^[0-7]+$ ]] || fail "pack directory mode is unreadable"
+(( (8#$pack_mode & 022) == 0 )) || fail "pack directory is writable by group or others"
 manifest="$pack_dir/pet.json"
 [[ -f "$manifest" && ! -L "$manifest" ]] || fail "pet.json is missing or a symlink"
 
 max_json=131072
 max_png=4194304
 max_total=8388608
+
+# identify decodes untrusted image bytes. Keep the decoder's memory, map, disk,
+# thread, and wall-clock budgets explicit even though the current runtime only
+# loads the bundled packs; future external packs must pass this same gate.
+export MAGICK_MEMORY_LIMIT=64MiB
+export MAGICK_MAP_LIMIT=128MiB
+export MAGICK_DISK_LIMIT=128MiB
+export MAGICK_THREAD_LIMIT=2
+export MAGICK_TIME_LIMIT=5
 
 # Inspect the complete pack tree before reading any manifest-controlled path.
 # Symlinks, special files, and executable content are all rejected even when
@@ -40,10 +53,19 @@ pack_total=0
 while IFS= read -r -d '' entry; do
   [[ ! -L "$entry" ]] || fail "pack contains a symlink"
   if [[ -f "$entry" ]]; then
+    [[ -O "$entry" ]] || fail "pack contains content not owned by the current user"
+    entry_mode="$(stat -c '%a' -- "$entry" 2>/dev/null || printf 0)"
+    [[ "$entry_mode" =~ ^[0-7]+$ ]] || fail "pack contains content with unreadable permissions"
+    (( (8#$entry_mode & 022) == 0 )) || fail "pack contains group/world-writable content"
     [[ ! -x "$entry" ]] || fail "pack contains executable content"
     entry_size="$(stat -c '%s' -- "$entry" 2>/dev/null || printf 0)"
     pack_total=$((pack_total + entry_size))
-  elif [[ ! -d "$entry" ]]; then
+  elif [[ -d "$entry" ]]; then
+    [[ -O "$entry" ]] || fail "pack contains a directory not owned by the current user"
+    entry_mode="$(stat -c '%a' -- "$entry" 2>/dev/null || printf 0)"
+    [[ "$entry_mode" =~ ^[0-7]+$ ]] || fail "pack contains a directory with unreadable permissions"
+    (( (8#$entry_mode & 022) == 0 )) || fail "pack contains a group/world-writable directory"
+  else
     fail "pack contains a special file"
   fi
 done < <(find -P "$pack_dir" -mindepth 1 -print0)
@@ -61,7 +83,7 @@ if ! json_ok="$(jq -e '
     and (startswith("/") | not) and (contains("..") | not)
     and (test("[[:cntrl:]]") | not);
   def intbetween($low; $high): type == "number" and . == floor and . >= $low and . <= $high;
-  def seqok:
+  def seqok($max_frame):
     type == "object"
     and (.frames | type == "array" and length >= 1 and length <= 16)
     and (.durations | type == "array")
@@ -70,7 +92,7 @@ if ! json_ok="$(jq -e '
     and (.frames | length) == (.anchors | length)
     and (.loop | type == "boolean")
     and (.mirrorSafe | type == "boolean")
-    and all(.frames[]; intbetween(0; 63))
+    and all(.frames[]; intbetween(0; $max_frame))
     and all(.durations[]; intbetween(16; 4000))
     and all(.anchors[]; type == "object" and (.x | type == "number" and . >= 0 and . <= 32)
       and (.y | type == "number" and . >= 0 and . <= 32))
@@ -91,7 +113,7 @@ if ! json_ok="$(jq -e '
     and (.width | intbetween(1; 64)) and (.height | intbetween(1; 64)))
   and ($root.actions | type == "object")
   and all(["peek", "enter", "land", "idle", "walk", "corner", "climb", "dance", "success", "failure", "exit", "sleep"][];
-    $root.actions[.] | seqok)
+    $root.actions[.] | seqok(($root.atlas.columns * $root.atlas.rows) - 1))
   and ($root.fallbacks | type == "object")
   and all($root.fallbacks | to_entries[];
     . as $entry | ($entry.value | type == "string")

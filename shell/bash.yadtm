@@ -17,7 +17,16 @@ _yadtm_active_seq=0
 _yadtm_started=0
 _yadtm_ready=0
 _yadtm_in_debug=0
+_yadtm_event_writes=0
 printf -v _yadtm_debug_command_var '%s%s' BASH_ COMMAND
+
+_yadtm_rotate_events() {
+  _yadtm_event_writes=$((_yadtm_event_writes + 1))
+  (( _yadtm_event_writes >= 64 )) || return 0
+  _yadtm_event_writes=0
+  [[ -x ${YADTM_EVENT_ROTATOR:-} ]] || return 0
+  "$YADTM_EVENT_ROTATOR" rotate-events >/dev/null 2>&1 || :
+}
 
 _yadtm_start() {
   [[ ${_yadtm_started:-0} == 0 ]] || return 0
@@ -27,6 +36,7 @@ _yadtm_start() {
   # Keep this as one builtin printf append. In particular, do not add command
   # text or call a helper from the prompt path.
   printf 'v1\tstart\t%s\t%s\t%s\n' "$_yadtm_session" "$_yadtm_active_seq" "${EPOCHREALTIME:-0}" >>"$YADTM_COMMAND_EVENTS" 2>/dev/null || :
+  _yadtm_rotate_events
 }
 
 _yadtm_finish() {

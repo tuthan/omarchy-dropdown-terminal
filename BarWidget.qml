@@ -125,17 +125,31 @@ BarWidget {
   readonly property var shellStatusReport: service.shellStatusReport
   readonly property bool shellStatusReady: service.shellStatusReady
   readonly property string shellActionMessage: service.shellActionMessage
-  readonly property string petDiagnostic: effectsLoader.item && effectsLoader.item.petDiagnostic
-    ? String(effectsLoader.item.petDiagnostic) : ""
+  readonly property bool effectsEnabled: service.entranceEffect !== "Off"
+    && service.effectIntensity > 0 && !service.reduceMotion
+  readonly property string petDiagnostic: petLoader.item && petLoader.item.petDiagnostic
+    ? String(petLoader.item.petDiagnostic) : ""
 
-  // BarWidget is instantiated once per output by Omarchy. The loader keeps
-  // the fully-disabled path genuinely absent: no PanelWindow, particle
-  // system, timers, or rounding probe exist when both visual layers are off.
+  // BarWidget is instantiated once per output by Omarchy. Separate loaders keep
+  // each optional visual stack genuinely absent when it is not selected: an
+  // effect never creates pet state or atlas decoders, and a pet never creates
+  // the Qt particle system.
   Loader {
     id: effectsLoader
-    active: service.entranceEffect !== "Off" || service.petEnabled
+    active: root.effectsEnabled
     sourceComponent: Component {
       TerminalEffects {
+        service: terminalService
+        hostScreen: root.QsWindow.window ? root.QsWindow.window.screen : null
+      }
+    }
+  }
+
+  Loader {
+    id: petLoader
+    active: service.petEnabled
+    sourceComponent: Component {
+      PetLayer {
         service: terminalService
         hostScreen: root.QsWindow.window ? root.QsWindow.window.screen : null
       }

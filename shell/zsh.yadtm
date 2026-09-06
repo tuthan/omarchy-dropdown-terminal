@@ -9,7 +9,16 @@ _yadtm_session="${YADTM_TERMINAL_SESSION:-zsh}-zsh-$$"
 typeset -gi _yadtm_seq=0
 typeset -gi _yadtm_started=0
 typeset -gi _yadtm_active_seq=0
+typeset -gi _yadtm_event_writes=0
 zmodload zsh/datetime 2>/dev/null || true
+
+_yadtm_rotate_events() {
+  _yadtm_event_writes=$((_yadtm_event_writes + 1))
+  (( _yadtm_event_writes >= 64 )) || return 0
+  _yadtm_event_writes=0
+  [[ -x ${YADTM_EVENT_ROTATOR:-} ]] || return 0
+  "$YADTM_EVENT_ROTATOR" rotate-events >/dev/null 2>&1 || true
+}
 
 _yadtm_start() {
   (( _yadtm_started == 0 )) || return 0
@@ -17,6 +26,7 @@ _yadtm_start() {
   _yadtm_active_seq=$_yadtm_seq
   _yadtm_started=1
   printf 'v1\tstart\t%s\t%s\t%s\n' "$_yadtm_session" "$_yadtm_active_seq" "${EPOCHREALTIME:-0}" >>"$YADTM_COMMAND_EVENTS" 2>/dev/null || true
+  _yadtm_rotate_events
 }
 
 _yadtm_finish() {
