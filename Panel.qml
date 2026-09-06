@@ -405,8 +405,7 @@ Panel {
         width: parent.width
         spacing: Style.space(10)
         visible: root.settingsTab === "general"
-        implicitHeight: visible ? childrenRect.height : 0
-        height: implicitHeight
+        height: visible ? childrenRect.height : 0
 
       PanelSeparator { width: parent.width }
 
@@ -632,8 +631,7 @@ Panel {
         width: parent.width
         spacing: Style.space(10)
         visible: root.settingsTab === "animation"
-        implicitHeight: visible ? childrenRect.height : 0
-        height: implicitHeight
+        height: visible ? childrenRect.height : 0
 
       Text {
         text: "Entrance effect"
@@ -789,8 +787,7 @@ Panel {
         width: parent.width
         spacing: Style.space(10)
         visible: root.settingsTab === "general"
-        implicitHeight: visible ? childrenRect.height : 0
-        height: implicitHeight
+        height: visible ? childrenRect.height : 0
 
       PanelSeparator { width: parent.width }
 
@@ -844,8 +841,7 @@ Panel {
         width: parent.width
         spacing: Style.space(8)
         visible: root.commandTracking
-        implicitHeight: visible ? childrenRect.height : 0
-        height: implicitHeight
+        height: visible ? childrenRect.height : 0
 
         Text {
           width: parent.width

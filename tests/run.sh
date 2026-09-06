@@ -187,7 +187,7 @@ assert_status "shell confirmation keeps its action row reachable" grep -Fq 'Guar
 assert_status "settings exposes a general tab" grep -Fq 'label: "General"' "$root_dir/Panel.qml"
 assert_status "settings exposes an animation and pets tab" grep -Fq 'label: "Animation & pets"' "$root_dir/Panel.qml"
 assert_status "settings tabs reset the scroll position" grep -Fq 'contentScroll.contentY = 0' "$root_dir/Panel.qml"
-assert_status "tab pages collapse when inactive" grep -Fq 'implicitHeight: visible ? childrenRect.height : 0' "$root_dir/Panel.qml"
+assert_status "tab pages collapse when inactive" grep -Fq 'height: visible ? childrenRect.height : 0' "$root_dir/Panel.qml"
 assert_false "bash adapter does not capture command text" grep -Fq 'BASH_COMMAND' "$root_dir/shell/bash.yadtm"
 assert_false "bash adapter has no prompt-path external date" grep -Fq 'date ' "$root_dir/shell/bash.yadtm"
 assert_false "fish adapter has no prompt-path external date" grep -Fq 'date ' "$root_dir/shell/fish.yadtm"
