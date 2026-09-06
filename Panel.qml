@@ -60,6 +60,7 @@ Panel {
   }
   readonly property bool commandFailureIndicator: root.setting("commandFailureIndicator", true) !== false
   readonly property bool commandCancelIsFailure: root.setting("commandCancelIsFailure", false) === true
+  property string settingsTab: "general"
   readonly property color pickerColor: {
     var match = root.borderSetting.match(/^rgb\(([0-9a-fA-F]{6})\)$/)
     return match ? Qt.color("#" + match[1]) : Color.accent
@@ -165,6 +166,12 @@ Panel {
   function setWidth(value) { persistSettings({ widthPercent: Math.round(value) }) }
   function setHeight(value) { persistSettings({ heightPercent: Math.round(value) }) }
   function setAutoHide(value) { persistSettings({ autoHideOnFocusLoss: value }) }
+  function setSettingsTab(value) {
+    var next = value === "animation" ? "animation" : "general"
+    if (root.settingsTab === next) return
+    root.settingsTab = next
+    if (contentScroll) contentScroll.contentY = 0
+  }
   function setSpecialFallthrough(value) {
     persistSettings({ allowSpecialFallthrough: value })
     if (root.hostWidget && typeof root.hostWidget.setSpecialFallthrough === "function")
@@ -378,6 +385,28 @@ Panel {
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.caption
       }
+
+      ButtonGroup {
+        id: settingsTabs
+        width: parent.width
+        options: [
+          { value: "general", label: "General", tooltip: "Bar, terminal, command, and integration settings." },
+          { value: "animation", label: "Animation & pets", tooltip: "Entrance effects, pets, and motion settings." }
+        ]
+        value: root.settingsTab
+        foreground: root.contentForeground
+        accent: Color.accent
+        fontFamily: root.contentFontFamily
+        onChanged: function(value) { root.setSettingsTab(value) }
+      }
+
+      Column {
+        id: generalSettingsPage
+        width: parent.width
+        spacing: Style.space(10)
+        visible: root.settingsTab === "general"
+        implicitHeight: visible ? childrenRect.height : 0
+        height: implicitHeight
 
       PanelSeparator { width: parent.width }
 
@@ -596,6 +625,16 @@ Panel {
         }
       }
 
+      }
+
+      Column {
+        id: animationSettingsPage
+        width: parent.width
+        spacing: Style.space(10)
+        visible: root.settingsTab === "animation"
+        implicitHeight: visible ? childrenRect.height : 0
+        height: implicitHeight
+
       Text {
         text: "Entrance effect"
         color: Util.alpha(root.contentForeground, 0.64)
@@ -743,6 +782,16 @@ Panel {
         onChanged: function(value) { root.setPetActivity(value) }
       }
 
+      }
+
+      Column {
+        id: commandSettingsPage
+        width: parent.width
+        spacing: Style.space(10)
+        visible: root.settingsTab === "general"
+        implicitHeight: visible ? childrenRect.height : 0
+        height: implicitHeight
+
       PanelSeparator { width: parent.width }
 
       Text {
@@ -791,9 +840,12 @@ Panel {
       }
 
       Column {
+        id: commandDetails
         width: parent.width
         spacing: Style.space(8)
         visible: root.commandTracking
+        implicitHeight: visible ? childrenRect.height : 0
+        height: implicitHeight
 
         Text {
           width: parent.width
@@ -884,6 +936,8 @@ Panel {
           font.pixelSize: Style.font.bodySmall
           wrapMode: Text.WordWrap
         }
+      }
+
       }
 
       }
