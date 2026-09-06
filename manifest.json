@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.tuthan.dropdown-terminal",
   "name": "Dropdown Terminal",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "author": "Hung Vo",
   "license": "MIT",
-  "description": "Summon the configured default terminal in a floating special workspace",
+  "description": "A focused Omarchy dropdown terminal with bounded entrance effects, click-through pets, and privacy-preserving command completion indicators.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Dropdown Terminal",
-    "description": "Toggle the default terminal as a dropdown",
+    "description": "Summon the configured default terminal with optional effects, pets, and shell-aware completion indicators.",
     "category": "Utilities",
     "allowMultiple": false,
     "defaultSection": "right",

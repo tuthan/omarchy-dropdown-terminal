@@ -1,13 +1,28 @@
 # Dropdown Terminal
 
-An Omarchy Quickshell plugin that toggles the configured default terminal as a
-floating overlay on the current Hyprland workspace.
+An Omarchy Quickshell plugin for summoning the configured default terminal as a
+fast, focused floating overlay on the current Hyprland workspace—with bounded
+entrance effects, click-through pets, and optional privacy-preserving command
+completion indicators.
 
 ![Dropdown Terminal preview](preview.png)
 
 ## Video Demo
 
 https://github.com/user-attachments/assets/f9a374ee-0e1f-4f67-b7dd-a44dcc4f5207
+
+## What's new in 2.0
+
+Version 2.0 focuses the plugin around a calmer, clearer control surface:
+
+- The settings panel is split into `General` and `Animation & pets`, with native
+  keyboard navigation and bounded scrolling.
+- Entrance effects now include `Fire / burn`, `Firework`, `Thunder`, `Snow`, and
+  `Rain`, alongside `Off` and `Glow`.
+- The pet library includes the validated `Penguin`, `Fluffy cat`, and `Corgi`
+  packs.
+- Command tracking remains opt-in, explicit, and privacy-preserving: it records
+  lifecycle metadata only, never command text or terminal output.
 
 ## Install
 
@@ -106,6 +121,16 @@ confirmation performs the atomic edit and Hyprland reload.
 Middle-click the bar icon to open the settings panel:
 
 ![Dropdown Terminal settings panel](settings-panel.png)
+
+The panel is organized into two tabs to keep related controls together:
+
+- `General` contains terminal sizing and behavior, urgency, command tracking,
+  and shell integration.
+- `Animation & pets` contains entrance effects, intensity, pet selection and
+  activity, plus reduced-motion controls.
+
+Long effect lists stay inside the panel's scrollable content area, so the
+settings card remains usable at smaller heights.
 
 The bar widget settings include `Show icon`. Turn it off to hide the icon while
 keeping the global shortcut and terminal service active.
