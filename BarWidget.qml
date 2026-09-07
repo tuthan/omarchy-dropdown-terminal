@@ -48,6 +48,8 @@ BarWidget {
         + (service.commandUnreadCount > 1 ? " (" + service.commandUnreadCount + " unread)" : "")
     if (service.commandTracking && !service.commandIntegrationInstalled)
       return "Dropdown Terminal · command tracking not configured; urgency remains available"
+    if (service.bindingStatus === "installed")
+      return "Left-click: terminal · Middle-click: settings · Right-click: review binding " + root.keybinding
     return "Left-click: terminal · Middle-click: settings · Right-click: bind " + root.keybinding
   }
 
@@ -86,13 +88,19 @@ BarWidget {
   }
 
   function requestBindingInstall() {
-    if (!settingsLoader.item) return
+    if (!settingsLoader.item) {
+      pendingBindingRequest = true
+      return
+    }
+    pendingBindingRequest = false
     root.open()
     Qt.callLater(function() {
       if (settingsLoader.item && typeof settingsLoader.item.requestBindingInstall === "function")
         settingsLoader.item.requestBindingInstall()
     })
   }
+
+  property bool pendingBindingRequest: false
 
   function setSpecialFallthrough(enabled) {
     service.applySpecialFallthrough(enabled)
@@ -165,6 +173,7 @@ BarWidget {
     onLoaded: {
       root.injectSettingsPanel()
       Qt.callLater(root.injectSettingsPanel)
+      if (root.pendingBindingRequest) Qt.callLater(root.requestBindingInstall)
     }
   }
 

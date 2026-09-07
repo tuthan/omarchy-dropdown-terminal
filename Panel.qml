@@ -216,6 +216,13 @@ Panel {
   }
 
   function requestBindingInstall() {
+    // Right-click is also the documented way to review an existing binding.
+    // Keep the panel useful when the exact managed line is already installed;
+    // returning without selecting General made the gesture look broken.
+    if (root.hostWidget && root.hostWidget.bindingStatus === "installed") {
+      root.setSettingsTab("general")
+      return
+    }
     if (root.hostWidget && typeof root.hostWidget.refreshMutationStatus === "function")
       root.hostWidget.refreshMutationStatus()
     if (root.hostWidget && root.hostWidget.bindingStatusReady === false) {
@@ -223,7 +230,10 @@ Panel {
       bindingPreflightTimer.restart()
       return
     }
-    if (root.hostWidget && root.hostWidget.bindingStatus === "installed") return
+    if (root.hostWidget && root.hostWidget.bindingStatus === "installed") {
+      root.setSettingsTab("general")
+      return
+    }
     root.beginConfirmation("binding")
   }
 
@@ -241,6 +251,8 @@ Panel {
         root.bindingPreflightWaiting = false
         if (!root.hostWidget || root.hostWidget.bindingStatus !== "installed")
           root.beginConfirmation("binding")
+        else
+          root.setSettingsTab("general")
       }
     }
   }
