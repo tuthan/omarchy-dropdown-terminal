@@ -17,6 +17,16 @@ Item {
   property int configRevision: 0
   property int stateRevision: 0
   property int observationRevision: 0
+  property bool observationCheckPending: false
+  property bool observationCheckToplevels: false
+  property bool observationCheckMonitors: false
+  property int observationCheckAttempts: 0
+  property string observationBeforeToplevels: ""
+  property string observationBeforeMonitors: ""
+  // The helper can animate a cross-output move for roughly 1.25 seconds.
+  // Keep reconciling for a little longer than that so the model cannot stop
+  // on the old owner while the compositor is still moving the client.
+  readonly property int maxObservationCheckAttempts: 15
   property int commandRevision: 0
   property int eventProcessedOffset: 0
   property string eventIncompleteTail: ""
@@ -109,6 +119,19 @@ Item {
     interval: 100
     repeat: false
     onTriggered: if (root.terminalVisible) root.refreshObservedState()
+  }
+
+  // Hyprland.refreshToplevels()/refreshMonitors() complete through the IPC
+  // event loop. Keep the cheap snapshot optimization, but check once after
+  // the model has had time to publish the refreshed objects. Without this,
+  // a cross-monitor summon can leave every per-screen service with the old
+  // monitor/geometry and the visual layers either disappear or stay on the
+  // previous output.
+  Timer {
+    id: observationRefreshTimer
+    interval: 100
+    repeat: false
+    onTriggered: root.completeObservationCheck()
   }
 
   // Omarchy documents that a FileView watch can stop delivering notifications
@@ -598,9 +621,7 @@ Item {
   readonly property var terminalMonitor: {
     observationRevision
     var toplevel = root.trackedToplevel
-    // HyprlandToplevel.monitor is already the HyprlandMonitor object. Treating
-    // it as an integer id leaves the monitor null on every normal model update.
-    return toplevel && toplevel.monitor ? toplevel.monitor : null
+    return root.monitorFromClientPayload(toplevel)
   }
 
   function normalizedSnapshotNumber(value) {
@@ -617,7 +638,8 @@ Item {
       if (!toplevel || root.normalizedAddress(toplevel.address) !== address) continue
       var ipc = toplevel.lastIpcObject
       if (!ipc || !ipc.at || !ipc.size) return address + "|missing"
-      var monitorName = toplevel.monitor ? String(toplevel.monitor.name || "") : ""
+      var monitor = root.monitorFromClientPayload(toplevel)
+      var monitorName = monitor ? String(monitor.name || "") : ""
       return [address, monitorName, root.normalizedSnapshotNumber(ipc.at[0]),
         root.normalizedSnapshotNumber(ipc.at[1]), root.normalizedSnapshotNumber(ipc.size[0]),
         root.normalizedSnapshotNumber(ipc.size[1])].join("|")
@@ -641,25 +663,110 @@ Item {
     return values.join(";")
   }
 
+  // During a special-workspace transfer the HyprlandToplevel.monitor QObject
+  // can lag behind the client payload. The payload is the same source used by
+  // `hyprctl clients -j`, so resolve its monitor id/name against the refreshed
+  // monitor model before falling back to the convenience property.
+  function monitorFromClientPayload(toplevel) {
+    if (!toplevel) return null
+    var ipc = toplevel.lastIpcObject || {}
+    var raw = ipc.monitor
+    var monitors = Hyprland.monitors ? (Hyprland.monitors.values || []) : []
+    var numericId = Number(raw)
+    if (isFinite(numericId)) {
+      for (var i = 0; i < monitors.length; i++) {
+        if (monitors[i] && Number(monitors[i].id) === numericId) return monitors[i]
+      }
+    }
+    var name = String(raw === undefined || raw === null ? "" : raw)
+    if (name) {
+      for (var j = 0; j < monitors.length; j++) {
+        if (monitors[j] && String(monitors[j].name || "") === name) return monitors[j]
+      }
+    }
+    return toplevel.monitor || null
+  }
+
+  function queueObservationCheck(toplevelSnapshot, monitorSnapshot) {
+    var checkToplevels = toplevelSnapshot !== undefined && toplevelSnapshot !== null
+    var checkMonitors = monitorSnapshot !== undefined && monitorSnapshot !== null
+    if (!checkToplevels && !checkMonitors) return
+
+    if (!root.observationCheckPending) root.observationCheckAttempts = 0
+
+    if (checkToplevels && !root.observationCheckToplevels) {
+      root.observationBeforeToplevels = String(toplevelSnapshot)
+      root.observationCheckToplevels = true
+    }
+    if (checkMonitors && !root.observationCheckMonitors) {
+      root.observationBeforeMonitors = String(monitorSnapshot)
+      root.observationCheckMonitors = true
+    }
+    root.observationCheckPending = true
+    observationRefreshTimer.restart()
+  }
+
+  function completeObservationCheck() {
+    if (!root.observationCheckPending) return
+
+    var changed = false
+    if (root.observationCheckToplevels
+        && root.observationBeforeToplevels !== root.toplevelGeometrySnapshot()) changed = true
+    if (root.observationCheckMonitors
+        && root.observationBeforeMonitors !== root.monitorSnapshot()) changed = true
+
+    // A monitor transfer can take longer than one IPC turn while Hyprland is
+    // finishing the window move. Re-issue the bounded refresh a few times so
+    // the owner monitor cannot remain stale just because the first response
+    // arrived before the compositor published the new toplevel.
+    if (!changed && root.observationCheckAttempts < root.maxObservationCheckAttempts) {
+      root.observationCheckAttempts++
+      if (root.observationCheckToplevels && typeof Hyprland.refreshToplevels === "function")
+        Hyprland.refreshToplevels()
+      if (root.observationCheckMonitors && typeof Hyprland.refreshMonitors === "function")
+        Hyprland.refreshMonitors()
+      observationRefreshTimer.restart()
+      return
+    }
+
+    root.observationCheckPending = false
+    root.observationCheckToplevels = false
+    root.observationCheckMonitors = false
+    root.observationCheckAttempts = 0
+    root.observationBeforeToplevels = ""
+    root.observationBeforeMonitors = ""
+    if (changed) root.observationRevision++
+  }
+
   function refreshToplevels() {
     var before = root.toplevelGeometrySnapshot()
-    if (typeof Hyprland.refreshToplevels === "function") Hyprland.refreshToplevels()
-    if (before !== root.toplevelGeometrySnapshot()) observationRevision++
+    if (typeof Hyprland.refreshToplevels !== "function") return
+    Hyprland.refreshToplevels()
+    if (before !== root.toplevelGeometrySnapshot()) root.observationRevision++
+    else root.queueObservationCheck(before, null)
   }
 
   function refreshMonitors() {
     var before = root.monitorSnapshot()
-    if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
-    if (before !== root.monitorSnapshot()) observationRevision++
+    if (typeof Hyprland.refreshMonitors !== "function") return
+    Hyprland.refreshMonitors()
+    if (before !== root.monitorSnapshot()) root.observationRevision++
+    else root.queueObservationCheck(null, before)
   }
 
   function refreshObservedState() {
     var beforeToplevels = root.toplevelGeometrySnapshot()
     var beforeMonitors = root.monitorSnapshot()
-    if (typeof Hyprland.refreshToplevels === "function") Hyprland.refreshToplevels()
-    if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
-    if (beforeToplevels !== root.toplevelGeometrySnapshot()
-        || beforeMonitors !== root.monitorSnapshot()) observationRevision++
+    var refreshedToplevels = typeof Hyprland.refreshToplevels === "function"
+    var refreshedMonitors = typeof Hyprland.refreshMonitors === "function"
+    if (refreshedToplevels) Hyprland.refreshToplevels()
+    if (refreshedMonitors) Hyprland.refreshMonitors()
+    var toplevelsChanged = beforeToplevels !== root.toplevelGeometrySnapshot()
+    var monitorsChanged = beforeMonitors !== root.monitorSnapshot()
+    if (toplevelsChanged || monitorsChanged) root.observationRevision++
+    root.queueObservationCheck(
+      refreshedToplevels && !toplevelsChanged ? beforeToplevels : null,
+      refreshedMonitors && !monitorsChanged ? beforeMonitors : null)
   }
 
   readonly property string helperPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal").toString().replace(/^file:\/\//, "")

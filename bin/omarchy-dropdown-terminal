@@ -1044,6 +1044,10 @@ if [[ -n "$terminal_address" ]] && is_client_address "$terminal_address" && clie
       compute_geometry_on "$focused_id"
       size_window "$terminal_address"
       move_window "$terminal_window" "$top_margin"
+      # A cross-output move updates Hyprland's client monitor asynchronously.
+      # Wait for the final position before publishing the shown transition so
+      # the QML observers can refresh against the destination monitor.
+      wait_window_y "$terminal_address" "$top_margin" "$(move_animation_seconds)" || true
       focus_window "$terminal_window"
       transition_result=$?
       (( transition_result == 0 )) && record_lifecycle shown "$terminal_address" || true
