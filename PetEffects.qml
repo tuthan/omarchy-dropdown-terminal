@@ -48,7 +48,7 @@ Item {
   }
 
   function burst(kind) {
-    if (root.reducedMotion || ["land", "success", "failure", "hearts"].indexOf(kind) < 0) return
+    if (root.reducedMotion || ["land", "success", "failure", "hearts", "puff"].indexOf(kind) < 0) return
     root.burstKind = kind
     root.progress = 0
     root.burstSerial++
@@ -73,14 +73,14 @@ Item {
       property: "progress"
       from: 0
       to: 1
-      duration: root.burstKind === "failure" ? 360 : 440
+      duration: root.burstKind === "failure" ? 360 : (root.burstKind === "puff" ? 520 : 440)
       easing.type: Easing.OutCubic
     }
     onFinished: root.finish()
   }
 
   Repeater {
-    model: 2
+    model: root.burstKind === "puff" ? 4 : 2
     delegate: Rectangle {
       width: root.burstKind === "failure" ? Style.space(3) : Style.space(4)
       height: width
@@ -88,8 +88,11 @@ Item {
       color: index === 0 ? root.accentColor : root.quietColor
       visible: root.active
       opacity: root.active ? 1 - root.progress : 0
-      x: root.originX + (index === 0 ? -Style.space(5) : Style.space(5))
-        + (index === 0 ? -1 : 1) * root.progress * Style.space(7)
+      x: root.originX + (root.burstKind === "puff"
+        ? (index % 2 === 0 ? -1 : 1) * (Style.space(4) + index * Style.space(2))
+        : (index === 0 ? -Style.space(5) : Style.space(5)))
+        + (root.burstKind === "puff" ? (index % 2 === 0 ? -1 : 1) : (index === 0 ? -1 : 1))
+          * root.progress * Style.space(7)
       y: root.originY - root.progress * (Style.space(8) + index * Style.space(4))
     }
   }

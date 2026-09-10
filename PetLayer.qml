@@ -23,13 +23,29 @@ Item {
     && service.terminalVisible === true && root.hostMatchesTerminal
     && root.terminalGeometryValid
   readonly property bool interactionEnabled: petController.interactionEnabled
+  readonly property bool encounterInputEnabled: petController.encounterItem
+    && petController.encounterItem.inputEnabled === true
   readonly property string petHoverHalo: service ? service.petHoverHalo : "Off"
   readonly property int hoverHaloExtent: root.petHoverHalo === "Large" ? 48
     : (root.petHoverHalo === "Small" ? 24 : 0)
-  readonly property string petDiagnostic: petController.assetDiagnostic
-    || petController.roamingDiagnostic || petController.roomDiagnostic
-    || (petController.interactionDiagnostic || "")
-    || (petController.voiceDiagnostic || "") || (petController.soundDiagnostic || "")
+  function joinedDiagnostics() {
+    var messages = []
+    var candidates = [petController.assetDiagnostic, petController.roamingDiagnostic,
+      petController.roomDiagnostic, petController.interactionDiagnostic,
+      petController.voiceDiagnostic, petController.soundDiagnostic,
+      petController.encounterDiagnostic, service ? service.bondDiagnostic : ""]
+    for (var i = 0; i < candidates.length; i++) {
+      var message = String(candidates[i] || "")
+      if (message !== "" && messages.indexOf(message) < 0) messages.push(message)
+    }
+    return messages.join("\n")
+  }
+
+  readonly property string petDiagnostic: root.joinedDiagnostics()
+
+  function voiceAvailability(species) {
+    return petController.voiceAvailability(species)
+  }
 
   PanelWindow {
     id: panel
@@ -47,6 +63,9 @@ Item {
     // input; Service leaves only the real border when resize-on-border is off.
     mask: Region {
       item: root.interactionEnabled ? petController.spriteItem : null
+      Region {
+        item: root.encounterInputEnabled ? petController.encounterItem.villainSpriteItem : null
+      }
       Region {
         x: root.interactionEnabled && petController.spriteItem
           ? petController.spriteItem.x - root.hoverHaloExtent : 0
@@ -72,6 +91,15 @@ Item {
       service: root.service
       hostScreen: root.hostScreen
       surfaceReady: root.surfaceReady
+      encounterItem: petEncounter
+    }
+
+    PetEncounter {
+      id: petEncounter
+      anchors.fill: parent
+      controller: petController
+      service: root.service
+      hostScreen: root.hostScreen
     }
   }
 }

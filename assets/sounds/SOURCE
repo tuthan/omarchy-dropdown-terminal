@@ -2,3 +2,7 @@ pet.ogg     <- /usr/share/sounds/freedesktop/stereo/bell.oga
 success.ogg <- /usr/share/sounds/freedesktop/stereo/complete.oga
 failure.ogg <- /usr/share/sounds/freedesktop/stereo/dialog-warning.oga
 land.ogg    <- /usr/share/sounds/freedesktop/stereo/message.oga
+villain.ogg and victory.ogg were generated as original short mono Vorbis cues
+for Phase 7 on 2026-09-10 with FFmpeg's sine source and bounded fade-out
+envelopes. villain is 240 ms; victory is 720 ms. They contain no speech or
+user data.

@@ -11,9 +11,9 @@ TestCase {
     return {
       version: 1,
       tiers: {
-        Kind: { failed: line("kind fail"), succeeded: line("kind win"), petting: line("kind pet"), idle: line("kind idle") },
-        Sassy: { failed: ["Exit {status}? Bold strategy.", "Try again.", "Nope.", "That was quick.", "I saw that.", "Nearly."] , succeeded: line("sassy win"), petting: line("sassy pet"), idle: line("sassy idle") },
-        Savage: { failed: line("sav fail"), succeeded: ["Only {duration}. I aged.", "Fine.", "Sure.", "Okay.", "Wow.", "Again."], petting: line("sav pet"), idle: line("sav idle") }
+        Kind: { failed: line("kind fail"), succeeded: line("kind win"), petting: line("kind pet"), idle: line("kind idle"), villainAppear: line("kind arrive"), victory: line("kind victory"), assisted: line("kind assist"), defeat: line("kind defeat") },
+        Sassy: { failed: ["Exit {status}? Bold strategy.", "Try again.", "Nope.", "That was quick.", "I saw that.", "Nearly."], succeeded: line("sassy win"), petting: line("sassy pet"), idle: line("sassy idle"), villainAppear: line("sassy arrive"), victory: line("sassy victory"), assisted: line("sassy assist"), defeat: line("sassy defeat") },
+        Savage: { failed: line("sav fail"), succeeded: ["Only {duration}. I aged.", "Fine.", "Sure.", "Okay.", "Wow.", "Again."], petting: line("sav pet"), idle: line("sav idle"), villainAppear: line("sav arrive"), victory: line("sav victory"), assisted: line("sav assist"), defeat: line("sav defeat") }
       },
       species: { Cat: { Sassy: { failed: ["Cat says {status}.", "Cat says no.", "Cat is unimpressed.", "Cat watches.", "Cat blinks.", "Cat naps."] } } },
       facts: { status: 1, duration: "over 10 min" }
@@ -47,6 +47,14 @@ TestCase {
     var doc = document()
     doc.tiers.Kind.failed[0] = "bad {command}"
     verify(!PetVoice.validateDocument(doc).valid)
+  }
+
+  function test_encounter_event_budget() {
+    verify(PetVoice.encounterLineAllowed("villainAppear", [], 0))
+    verify(PetVoice.encounterLineAllowed("victory", ["villainAppear"], 1))
+    verify(!PetVoice.encounterLineAllowed("villainAppear", ["villainAppear"], 1))
+    verify(!PetVoice.encounterLineAllowed("failed", [], 0))
+    verify(!PetVoice.encounterLineAllowed("defeat", ["villainAppear", "victory", "assisted"], 3))
   }
 
   function test_unknown_event_is_rejected() {

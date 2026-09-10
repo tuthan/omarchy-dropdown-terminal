@@ -9,6 +9,7 @@ Item {
 
   property string actionName: "idle"
   property string species: "Penguin"
+  property string kind: "pet"
   property bool playbackRequested: false
   property bool reducedMotion: false
   property int frameCursor: 0
@@ -23,8 +24,12 @@ Item {
 
   readonly property string speciesKey: root.species === "Cat" ? "cat"
     : (root.species === "Corgi" ? "corgi" : "penguin")
-  readonly property string assetRoot: "assets/pets/" + root.speciesKey + "/"
-  readonly property string manifestPath: Qt.resolvedUrl(root.assetRoot + "pet.json").toString().replace(/^file:\/\//, "")
+  readonly property string villainKey: ["bug", "ghost"].indexOf(String(root.species).toLowerCase()) >= 0
+    ? String(root.species).toLowerCase() : "bug"
+  readonly property string assetRoot: root.kind === "villain"
+    ? "assets/villains/" + root.villainKey + "/" : "assets/pets/" + root.speciesKey + "/"
+  readonly property string manifestName: root.kind === "villain" ? "villain.json" : "pet.json"
+  readonly property string manifestPath: Qt.resolvedUrl(root.assetRoot + root.manifestName).toString().replace(/^file:\/\//, "")
   readonly property var actions: root.pack && root.pack.actions ? root.pack.actions : ({})
   readonly property var fallbacks: root.pack && root.pack.fallbacks ? root.pack.fallbacks : ({})
   readonly property var activeSequence: root.sequenceFor(root.actionName)
@@ -107,10 +112,72 @@ Item {
     return true
   }
 
-  function validPack(candidate) {
+  function sequenceTotal(sequence) {
+    if (!sequence || !Array.isArray(sequence.durations)) return 0
+    return sequence.durations.reduce(function(total, value) { return total + Number(value) }, 0)
+  }
+
+  function validVillainPack(candidate) {
+    if (!candidate || candidate.version !== 1 || candidate.kind !== "villain"
+        || !candidate.atlas || !candidate.actions || !candidate.fallbacks
+        || typeof candidate.fallbacks !== "object") return false
+    var atlas = candidate.atlas
+    if (!root.safeRelativePath(atlas.path) || atlas.frameWidth !== 32 || atlas.frameHeight !== 32
+        || !root.boundedInteger(atlas.columns, 1, 8) || !root.boundedInteger(atlas.rows, 1, 4)
+        || !root.boundedInteger(atlas.renderScale, 1, 4)
+        || atlas.columns * atlas.rows > 32) return false
+    var cellCount = atlas.columns * atlas.rows
+    var required = ["appear", "idle", "walk", "taunt", "flee", "defeated", "vanish"]
+    for (var i = 0; i < required.length; i++)
+      if (!root.validSequence(candidate.actions[required[i]], cellCount, 1, 16, 16, 4000)) return false
+    if (candidate.actions.appear.loop || root.sequenceTotal(candidate.actions.appear) > 400
+        || !candidate.actions.idle.loop || !candidate.actions.walk.loop
+        || !candidate.actions.taunt.loop || candidate.actions.taunt.frames.length < 2
+        || candidate.actions.taunt.frames.length > 6 || candidate.actions.flee.loop
+        || root.sequenceTotal(candidate.actions.flee) > 600 || candidate.actions.defeated.loop
+        || root.sequenceTotal(candidate.actions.defeated) > 900 || candidate.actions.vanish.loop
+        || root.sequenceTotal(candidate.actions.vanish) > 300) return false
+    if (!root.boundedInteger(candidate.actions.walk.stride, 4, 32)) return false
+    var speed = Number(candidate.actions.walk.stride) * Number(atlas.renderScale)
+      / root.sequenceTotal(candidate.actions.walk) * 1000
+    if (!isFinite(speed) || speed < 12 || speed > 60) return false
+    var fallbackNames = Object.keys(candidate.fallbacks)
+    if (fallbackNames.length !== 3 || candidate.fallbacks.taunt !== "idle"
+        || candidate.fallbacks.flee !== "vanish" || candidate.fallbacks.defeated !== "vanish") return false
+    for (var f = 0; f < fallbackNames.length; f++)
+      if (!candidate.actions[candidate.fallbacks[fallbackNames[f]]]) return false
+    for (var a = 0; a < required.length; a++) {
+      var standing = candidate.actions[required[a]]
+      for (var s = 0; s < standing.anchors.length; s++)
+        if (Number(standing.anchors[s].x) !== 16 || Number(standing.anchors[s].y) < 24
+            || Number(standing.anchors[s].y) > 32) return false
+    }
+    if (candidate.actions.climb) {
+      var climb = candidate.actions.climb
+      if (!climb.loop || !climb.mirrorSafe || !root.boundedInteger(climb.stride, 4, 32)
+          || !root.validSequence(climb, cellCount, 1, 16, 16, 4000)) return false
+      for (var c = 0; c < climb.anchors.length; c++)
+        if (Number(climb.anchors[c].x) < 0 || Number(climb.anchors[c].x) > 6
+            || Number(climb.anchors[c].y) < 12 || Number(climb.anchors[c].y) > 20) return false
+    }
+    if (candidate.actions.hang) {
+      var hang = candidate.actions.hang
+      if (!hang.loop || !hang.mirrorSafe || !root.boundedInteger(hang.stride, 4, 32)
+          || !root.validSequence(hang, cellCount, 1, 16, 16, 4000)) return false
+      for (var h = 0; h < hang.anchors.length; h++)
+        if (Number(hang.anchors[h].x) !== 16 || Number(hang.anchors[h].y) < 0
+            || Number(hang.anchors[h].y) > 4) return false
+    }
+    return true
+  }
+
+  function validPack(candidate, requestedKind) {
+    var packKind = requestedKind === undefined ? root.kind : String(requestedKind)
+    if (packKind === "villain") return root.validVillainPack(candidate)
     if (!candidate || [1, 2, 3].indexOf(Number(candidate.version)) < 0
         || !candidate.atlas || !candidate.actions)
       return false
+    if (candidate.kind !== undefined && candidate.kind !== "pet") return false
     var version = Number(candidate.version)
     var atlas = candidate.atlas
     if (!safeRelativePath(atlas.path) || !boundedInteger(atlas.frameWidth, 32, 32)
@@ -127,7 +194,6 @@ Item {
       if (!validSequence(sequence, cellCount, 1, 16, low, high)) return false
     }
     if (version === 3) {
-      if (candidate.kind !== undefined && candidate.kind !== "pet") return false
       var requiredWorld = ["climbDown", "hang"]
       for (var w = 0; w < requiredWorld.length; w++) {
         var worldSequence = candidate.actions[requiredWorld[w]]
@@ -262,10 +328,10 @@ Item {
     root.assetReady = false
     try {
       var candidate = JSON.parse(String(raw || ""))
-      if (!root.validPack(candidate)) {
+      if (!root.validPack(candidate, root.kind)) {
         root.pack = ({})
         root.assetReady = false
-        root.assetDiagnostic = root.species + " pack unavailable: invalid manifest"
+        root.assetDiagnostic = root.species + " " + root.kind + " pack unavailable: invalid manifest"
         return
       }
       root.pack = candidate
@@ -277,7 +343,7 @@ Item {
     } catch (e) {
       root.pack = ({})
       root.assetReady = false
-      root.assetDiagnostic = root.species + " pack unavailable: unreadable manifest"
+      root.assetDiagnostic = root.species + " " + root.kind + " pack unavailable: unreadable manifest"
     }
   }
 
@@ -290,19 +356,16 @@ Item {
       var actualHeight = Number(atlas.sourceSize.height)
       if (actualWidth !== expectedWidth || actualHeight !== expectedHeight) {
         root.assetReady = false
-        root.assetDiagnostic = root.species + " pack unavailable: atlas dimensions do not match (got "
+        root.assetDiagnostic = root.species + " " + root.kind + " pack unavailable: atlas dimensions do not match (got "
           + actualWidth + "x" + actualHeight + ", expected "
           + expectedWidth + "x" + expectedHeight + ")"
-      } else if (atlas.status === Image.Error) {
-        root.assetReady = false
-        root.assetDiagnostic = root.species + " pack unavailable: atlas could not be rendered"
       } else {
         root.assetReady = true
         root.assetDiagnostic = ""
       }
     } else if (atlas.status === Image.Error) {
       root.assetReady = false
-      root.assetDiagnostic = root.species + " pack unavailable: atlas could not be loaded"
+      root.assetDiagnostic = root.species + " " + root.kind + " pack unavailable: atlas could not be loaded"
     } else {
       root.assetReady = false
     }
@@ -379,6 +442,15 @@ Item {
 
   onActionNameChanged: root.restartSequence()
   onSpeciesChanged: {
+    root.manifestReady = false
+    root.assetReady = false
+    root.pack = ({})
+    root.assetDiagnostic = ""
+    root.frameCursor = 0
+    root.sequenceComplete = false
+    manifestFile.reload()
+  }
+  onKindChanged: {
     root.manifestReady = false
     root.assetReady = false
     root.pack = ({})

@@ -5,19 +5,31 @@
       "failed": ["Exit {status}. Happens to the best of us.", "A small detour.", "We can try that again.", "The shell said no.", "Every bug teaches something.", "Close, in spirit."],
       "succeeded": ["Exit 0. Nicely done.", "That landed cleanly.", "A quiet little victory.", "The shell approves.", "Good work, friend.", "One step complete."],
       "petting": ["That is lovely.", "Thank you for the scritch.", "A very good human.", "I like this arrangement.", "More of that, please.", "Purrhaps again?"],
-      "idle": ["I am keeping watch.", "The edge is cozy.", "All quiet here.", "A tiny stretch.", "Still here.", "Nice view from up here."]
+      "idle": ["I am keeping watch.", "The edge is cozy.", "All quiet here.", "A tiny stretch.", "Still here.", "Nice view from up here."],
+      "villainAppear": ["A little bug is here.", "Oh, a visitor.", "Something climbed up.", "Stay close, little friend.", "The edge has company.", "A tiny troublemaker arrived."],
+      "victory": ["We did it together.", {"text": "That was a brave little stand.", "minPeakTier": 1}, "The edge is safe again.", "A clean victory.", "You and I make a good team.", "The visitor is gone."],
+      "assisted": ["Thank you for helping.", "Your timing was perfect.", "Teamwork saves the edge.", "We chased it off together.", "That was a kind assist.", "The pet feels safer now."],
+      "defeat": ["We will try again.", "That visitor was scary.", "A little courage takes practice.", "The edge is quiet again.", "I am still here.", "Next time, together."]
     },
     "Sassy": {
       "failed": ["Exit {status}? Bold strategy.", "The shell has notes.", "That was not the plan.", "A dramatic little failure.", "Try reading the error next time.", "I saw that."],
       "succeeded": ["Exit 0? Finally.", "Look who got it right.", "Not bad at all.", "The shell may keep you.", "A suspiciously good result.", "I will allow it."],
       "petting": ["You may continue.", "Acceptable scritches.", "I suppose that was nice.", "Do not stop now.", "My fee is affection.", "Again, obviously."],
-      "idle": ["I am busy looking fabulous.", "The terminal edge suits me.", "Try not to break anything.", "I have seen worse.", "Waiting for your next move.", "This is fine."]
+      "idle": ["I am busy looking fabulous.", "The terminal edge suits me.", "Try not to break anything.", "I have seen worse.", "Waiting for your next move.", "This is fine."],
+      "villainAppear": ["A bug? How original.", "Look who crawled in.", "The edge has an unwanted guest.", "That visitor has terrible timing.", "Something is scuttling over.", "A tiny nuisance approaches."],
+      "victory": ["Obviously we won.", {"text": "Bravery suits us.", "minPeakTier": 1}, "The nuisance has left.", "A tidy little victory.", "You were useful after all.", "The edge is ours again."],
+      "assisted": ["Fine, that help was useful.", "Your timing was acceptable.", "Teamwork. Do not get used to it.", "You may take partial credit.", "The visitor lost the argument.", "That was a decent assist."],
+      "defeat": ["A temporary setback.", "Do not celebrate, visitor.", "We can do better next time.", "That was embarrassing for both of us.", "I am blaming the bug.", "The edge remains under review."]
     },
     "Savage": {
       "failed": ["Exit {status}. Truly ambitious.", "That command fell over.", "The shell deserves better.", "A spectacular misfire.", "You had one job.", "Please consult reality."],
       "succeeded": ["Only {duration}. I aged.", "Exit 0. Miracles happen.", "You finally pressed the right keys.", "The result is good; the process was not.", "I am almost impressed.", "Do not get comfortable."],
       "petting": ["Fine. You may pet me.", "That was barely adequate.", "Earn your next scritch.", "I tolerate this ritual.", "At least you are useful here.", "More. Quickly."],
-      "idle": ["I am judging the layout.", "The edge is doing all the work.", "Your terminal is a mess.", "I could do this faster.", "Wake me when it matters.", "Still waiting."]
+      "idle": ["I am judging the layout.", "The edge is doing all the work.", "Your terminal is a mess.", "I could do this faster.", "Wake me when it matters.", "Still waiting."],
+      "villainAppear": ["A bug has entered the scene.", "How charmingly inconvenient.", "The edge has acquired a pest.", "Something tiny thinks it belongs here.", "A nuisance is approaching.", "This is beneath my attention."],
+      "victory": ["Naturally, we prevailed.", {"text": "That was almost impressive.", "minPeakTier": 1}, "The pest has been removed.", "A result worth recording.", "You managed not to panic.", "The edge is under control."],
+      "assisted": ["Your help was marginally valuable.", "Do not mistake that for praise.", "You finally contributed.", "The pest lost to both of us.", "An adequate assist.", "Try to remember that timing."],
+      "defeat": ["A humiliating interruption.", "The pest gets one point.", "We will correct this error.", "At least the edge is still here.", "Do not look so pleased.", "A setback, not a surrender."]
     }
   },
   "species": {

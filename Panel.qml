@@ -14,6 +14,7 @@ Panel {
   property var hostWidget: null
   property var pendingSettings: null
   property string confirmKind: ""
+  property string confirmSpecies: ""
   property double confirmOpenedAt: 0
   property bool bindingPreflightWaiting: false
   readonly property bool confirming: confirmKind !== ""
@@ -41,13 +42,15 @@ Panel {
     return Math.max(0, Math.min(100, Math.round(value / 10) * 10))
   }
   readonly property bool petEnabled: root.setting("petEnabled", false) === true
+  readonly property bool petVillains: root.hostWidget
+    ? root.hostWidget.petVillains : root.setting("petVillains", true) !== false
   readonly property string petSpecies: {
     var value = String(root.setting("petSpecies", "Penguin"))
     return ["Penguin", "Cat", "Corgi"].indexOf(value) >= 0 ? value : "Penguin"
   }
   readonly property string petActivity: {
     var value = String(root.setting("petActivity", "On focus"))
-    return ["On focus", "Always while visible", "Celebrations only"].indexOf(value) >= 0
+    return ["On focus", "Always while visible", "Playful", "Celebrations only"].indexOf(value) >= 0
       ? value : "On focus"
   }
   readonly property bool petInteraction: root.setting("petInteraction", true) !== false
@@ -70,6 +73,19 @@ Panel {
   }
   readonly property bool petRememberPosition: root.hostWidget
     ? root.hostWidget.petRememberPosition : root.setting("petRememberPosition", true) !== false
+  readonly property var bondSpecies: root.hostWidget && root.hostWidget.service
+    && typeof root.hostWidget.service.bondSpeciesNames === "function"
+    ? root.hostWidget.service.bondSpeciesNames() : ["Penguin", "Cat", "Corgi"]
+  readonly property int bondRevision: root.hostWidget && root.hostWidget.service
+    ? Number(root.hostWidget.service.bondRevision || 0) : 0
+  readonly property bool bondUnavailable: root.hostWidget && root.hostWidget.service
+    ? root.hostWidget.service.bondUnavailable === true : false
+  readonly property bool bondOwner: root.hostWidget
+    ? root.hostWidget.bondOwner === true : false
+  readonly property bool bondReadReady: root.hostWidget
+    ? root.hostWidget.bondReadReady === true : false
+  readonly property string bondPath: root.hostWidget && root.hostWidget.service
+    ? String(root.hostWidget.service.bondPath || "") : ""
   readonly property bool reduceMotion: root.setting("reduceMotion", false) === true
   readonly property bool urgencyIndicator: root.setting("urgencyIndicator", true) !== false
   readonly property bool commandTracking: root.setting("commandTracking", false) === true
@@ -102,8 +118,20 @@ Panel {
   readonly property string integrationShell: String(root.shellStatusReport.shell || "bash")
   readonly property string shellConfigPath: String(root.shellStatusReport.config ||
     ((Quickshell.env("HOME") || "") + "/.bashrc"))
-  readonly property string petDiagnostic: root.hostWidget
-    ? String(root.hostWidget.petDiagnostic || "") : ""
+  readonly property string petDiagnostic: {
+    var lines = []
+    if (root.hostWidget && root.hostWidget.petDiagnostic)
+      lines = String(root.hostWidget.petDiagnostic).split("\n")
+    var service = root.hostWidget ? root.hostWidget.service : null
+    if (root.petVillains && (!service || service.commandIntegrationInstalled !== true))
+      lines.push("Villains need command tracking")
+    if (root.petVillains && service && service.commandFailureIndicator !== true)
+      lines.push("Villains need the Failures option enabled")
+    if (root.petVillains && root.reduceMotion)
+      lines.push("Villains are paused while Reduce motion is on")
+    if (root.petRoaming === "Whole border") lines.push("Encounters happen on the top edge")
+    return lines.filter(function(line, index) { return line && lines.indexOf(line) === index }).join("\n")
+  }
   readonly property string shellBlock: String(root.shellStatusReport.block ||
     '# BEGIN Dropdown Terminal shell integration\nYADTM_EXISTING_DEBUG_TRAP="$(trap -p DEBUG 2>/dev/null || true)"\nYADTM_EXISTING_DEBUG_TRAP_CAPTURED=1\n[[ -r "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/bash.yadtm" ]] \\\n  && source "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal/shell/bash.yadtm"\nunset YADTM_EXISTING_DEBUG_TRAP YADTM_EXISTING_DEBUG_TRAP_CAPTURED\n# END Dropdown Terminal shell integration')
   readonly property bool shellStatusReady: root.hostWidget && root.hostWidget.shellStatusReady === true
@@ -146,13 +174,18 @@ Panel {
     if (root.confirmKind === "shell-remove")
       return "Remove command tracking for " + root.integrationShell + "?\n\nTarget: " + root.shellConfigPath
         + "\nRemoval: deletes only the marked integration block; unrelated rc content stays unchanged.\nBackup: timestamped cp -p copy before atomic replacement."
+    if (root.confirmKind === "bond-reset")
+      return "Reset bond for " + root.confirmSpecies + "?\n\nSpecies: " + root.confirmSpecies
+        + "\nFile: " + root.bondPath
+        + "\nEffect: reset bond, counters, and peak tier to 0; the file is retained."
     return ""
   }
 
   readonly property string confirmAction: root.confirmKind === "binding"
     ? (root.bindingConflictCount > 0 ? "Add anyway" : "Add binding")
-    : (root.confirmKind === "fallthrough-enable" ? "Enable"
-      : (root.confirmKind === "shell-install" ? "Install" : "Remove"))
+      : (root.confirmKind === "fallthrough-enable" ? "Enable"
+      : (root.confirmKind === "shell-install" ? "Install"
+        : (root.confirmKind === "bond-reset" ? "Reset bond" : "Remove")))
 
   function savePendingSettings() {
     if (!root.pendingSettings) return
@@ -232,6 +265,7 @@ Panel {
     bindingPreflightTimer.stop()
     shellPreflightTimer.stop()
     root.confirmKind = ""
+    root.confirmSpecies = ""
     root.confirmOpenedAt = 0
   }
 
@@ -322,8 +356,17 @@ Panel {
     root.beginConfirmation(value ? "fallthrough-enable" : "fallthrough-disable")
   }
 
+  function requestBondReset(species) {
+    var name = String(species || "")
+    if (root.bondSpecies.indexOf(name) < 0 || root.bondUnavailable
+        || !root.bondOwner || !root.bondReadReady) return
+    root.confirmSpecies = name
+    root.beginConfirmation("bond-reset")
+  }
+
   function acceptConfirmation() {
     var kind = root.confirmKind
+    var species = root.confirmSpecies
     root.cancelConfirmation()
     if (kind === "binding") {
       if (root.hostWidget && typeof root.hostWidget.installHotkey === "function")
@@ -338,6 +381,9 @@ Panel {
     } else if (kind === "shell-remove") {
       if (root.hostWidget && typeof root.hostWidget.removeShellIntegration === "function")
         root.hostWidget.removeShellIntegration()
+    } else if (kind === "bond-reset") {
+      if (root.hostWidget && typeof root.hostWidget.resetBond === "function")
+        root.hostWidget.resetBond(species)
     }
   }
   function setDelay(value) { persistSettings({ autoHideDelayMs: Math.round(value) }) }
@@ -347,6 +393,7 @@ Panel {
     persistSettings({ effectIntensity: Math.max(0, Math.min(100, Math.round(value / 10) * 10)) })
   }
   function setPetEnabled(value) { persistSettings({ petEnabled: value }) }
+  function setPetVillains(value) { persistSettings({ petVillains: value }) }
   function setPetActivity(value) { persistSettings({ petActivity: value }) }
   function setPetInteraction(value) { persistSettings({ petInteraction: value }) }
   function setPetRoaming(value) { persistSettings({ petRoaming: value }) }
@@ -361,6 +408,26 @@ Panel {
   function setCommandNotifyAfter(value) { persistSettings({ commandNotifyAfterMs: Math.round(value / 500) * 500 }) }
   function setCommandFailureIndicator(value) { persistSettings({ commandFailureIndicator: value }) }
   function setCommandCancelIsFailure(value) { persistSettings({ commandCancelIsFailure: value }) }
+
+  function bondRecord(species) {
+    bondRevision
+    if (root.hostWidget && root.hostWidget.service
+        && typeof root.hostWidget.service.bondRecord === "function")
+      return root.hostWidget.service.bondRecord(species)
+    return { bond: 0, peakTier: 0 }
+  }
+
+  function bondTierName(value) {
+    var bond = Math.max(0, Math.min(100, Number(value) || 0))
+    return bond >= 75 ? "Inseparable" : (bond >= 50 ? "Friends"
+      : (bond >= 25 ? "Warming up" : "Wary"))
+  }
+
+  function voiceAvailability(species) {
+    if (root.hostWidget && typeof root.hostWidget.voiceAvailability === "function")
+      return root.hostWidget.voiceAvailability(species)
+    return { available: 0, total: 0 }
+  }
 
   function colorToHypr(color) {
     function channel(value) {
@@ -864,6 +931,19 @@ Panel {
           onClicked: root.setPetEnabled(!on)
         }
         Button {
+          property bool on: root.petVillains
+          text: (on ? "✓ " : "") + "Villains"
+          selected: on
+          tooltipText: on
+            ? "On: after a tracked command fails, a villain visits and the pet reacts."
+            : "Off: no villains; failures play the ordinary reaction."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setPetVillains(!on)
+        }
+        Button {
           property bool on: root.reduceMotion
           text: (on ? "✓ " : "") + "Reduce motion"
           selected: on
@@ -943,11 +1023,12 @@ Panel {
         font.pixelSize: Style.font.caption
       }
 
-      ButtonGroup {
+      WrappedButtonGroup {
         width: parent.width
         options: [
           { value: "On focus", label: "On focus", tooltip: "React to focus; otherwise remain quietly idle." },
           { value: "Always while visible", label: "Always visible", tooltip: "Allow infrequent walking and sleep while visible." },
+          { value: "Playful", label: "Playful", tooltip: "Walk more often with longer routes; choose Whole border for side and bottom-edge climbing." },
           { value: "Celebrations only", label: "Celebrations", tooltip: "Only react to precise success and failure results." }
         ]
         value: root.petActivity
@@ -955,6 +1036,67 @@ Panel {
         accent: Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setPetActivity(value) }
+      }
+
+      Text {
+        text: "Bond"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Repeater {
+        model: root.bondSpecies
+        delegate: Row {
+          width: animationSettingsPage.width
+          spacing: Style.space(6)
+          property var record: root.bondRecord(modelData)
+          Text {
+            width: Style.space(72)
+            text: modelData
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
+          Text {
+            width: Style.space(92)
+            text: root.bondTierName(parent.record.bond) + " " + Math.round(Number(parent.record.bond) || 0)
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
+          Item {
+            width: Math.max(36, animationSettingsPage.width - Style.space(72 + 92 + 18)
+              - resetBondButton.implicitWidth)
+            height: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            clip: true
+            Rectangle {
+              anchors.fill: parent
+              radius: Style.cornerRadius
+              color: Util.alpha(Color.popups.border, 0.55)
+            }
+            Rectangle {
+              width: parent.width * Math.max(0, Math.min(1, Number(parent.parent.record.bond) / 100))
+              height: parent.height
+              radius: Style.cornerRadius
+              color: Color.accent
+            }
+          }
+          Button {
+            id: resetBondButton
+            text: "Reset bond"
+            tooltipText: "Reset " + modelData + " bond to Wary (0); the state file is retained."
+            focusable: true
+            bordered: true
+            enabled: root.bondReadReady && root.bondOwner && !root.bondUnavailable
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+            onClicked: root.requestBondReset(modelData)
+          }
+        }
       }
 
       Text {
@@ -996,6 +1138,19 @@ Panel {
         accent: Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setPetVoice(value) }
+      }
+      Text {
+        width: parent.width
+        text: {
+          root.bondRevision
+          var availability = root.voiceAvailability(root.petSpecies)
+          return "Friendship unlocks more lines: " + Number(availability.available || 0)
+            + " of " + Number(availability.total || 0) + " available for " + root.petSpecies + "."
+        }
+        color: Util.alpha(root.contentForeground, 0.5)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
       }
 
       Text {

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.tuthan.dropdown-terminal",
   "name": "Dropdown Terminal",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "author": "Hung Vo",
   "license": "MIT",
   "description": "A focused Omarchy dropdown terminal with bounded entrance effects, interactive pets, and privacy-preserving command completion indicators.",
@@ -124,6 +124,13 @@
         "defaultValue": false
       },
       {
+        "key": "petVillains",
+        "type": "boolean",
+        "label": "Villains",
+        "description": "After a precise tracked command failure, let a bug or ghost visit the pet.",
+        "defaultValue": true
+      },
+      {
         "key": "petSpecies",
         "type": "enum",
         "label": "Pet species",
@@ -135,8 +142,8 @@
         "key": "petActivity",
         "type": "enum",
         "label": "Pet activity",
-        "options": ["On focus", "Always while visible", "Celebrations only"],
-        "description": "Choose when the selected pet may walk, sleep, or react while the terminal is visible.",
+        "options": ["On focus", "Always while visible", "Playful", "Celebrations only"],
+        "description": "Choose when the selected pet may walk, sleep, or react while the terminal is visible. Playful uses more frequent, longer routes.",
         "defaultValue": "On focus"
       },
       {

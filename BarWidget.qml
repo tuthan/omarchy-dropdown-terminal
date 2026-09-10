@@ -11,6 +11,7 @@ BarWidget {
     id: terminalService
     settings: root.settings
     moduleName: root.moduleName
+    hostScreen: root.QsWindow.window ? root.QsWindow.window.screen : null
   }
 
   readonly property var service: terminalService
@@ -136,13 +137,32 @@ BarWidget {
   readonly property string shellActionMessage: service.shellActionMessage
   readonly property bool effectsEnabled: service.entranceEffect !== "Off"
     && service.effectIntensity > 0 && !service.reduceMotion
-  readonly property string petDiagnostic: petLoader.item && petLoader.item.petDiagnostic
-    ? String(petLoader.item.petDiagnostic) : ""
+  readonly property string petDiagnostic: {
+    var lines = []
+    if (petLoader.item && petLoader.item.petDiagnostic)
+      lines.push(String(petLoader.item.petDiagnostic))
+    if (service.bondDiagnostic) lines.push(String(service.bondDiagnostic))
+    return lines.join("\n")
+  }
   readonly property bool petDrag: service.petDrag
   readonly property string petHoverHalo: service.petHoverHalo
   readonly property string petVoice: service.petVoice
   readonly property string petSound: service.petSound
   readonly property bool petRememberPosition: service.petRememberPosition
+  readonly property bool petVillains: service.petVillains
+  readonly property bool bondOwner: service.bondOwner
+  readonly property bool bondReadReady: service.bondReadReady
+
+  function resetBond(species) {
+    if (typeof service.resetBond === "function") return service.resetBond(species)
+    return false
+  }
+
+  function voiceAvailability(species) {
+    if (petLoader.item && typeof petLoader.item.voiceAvailability === "function")
+      return petLoader.item.voiceAvailability(species)
+    return { available: 0, total: 0 }
+  }
 
   // BarWidget is instantiated once per output by Omarchy. Separate loaders keep
   // each optional visual stack genuinely absent when it is not selected: an

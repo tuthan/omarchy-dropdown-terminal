@@ -3,7 +3,8 @@
 // Pure speech selection. This module deliberately never evaluates a template
 // or executes a string; the only substitutions are the two documented facts.
 
-var knownEvents = ["failed", "succeeded", "petting", "idle"]
+var knownEvents = ["failed", "succeeded", "petting", "idle", "villainAppear",
+  "victory", "assisted", "defeat"]
 var knownTiers = ["Kind", "Sassy", "Savage"]
 
 function finite(value, fallback) {
@@ -66,6 +67,36 @@ function pickLine(lines, tier, event, species, recent, random, unlocks) {
   }
   if (candidates.length === 0) return ""
   return candidates[Math.floor(randomValue(random) * candidates.length)]
+}
+
+function encounterLineAllowed(event, usedEvents, count) {
+  var name = String(event || "")
+  var used = Array.isArray(usedEvents) ? usedEvents : []
+  // Encounter events are stage names, so uniqueness is the one-line-per-stage
+  // gate. The count check is still explicit because a future stage may share
+  // an event name without being allowed to extend the encounter budget.
+  return ["villainAppear", "victory", "assisted", "defeat"].indexOf(name) >= 0
+    && used.indexOf(name) < 0
+    && Number(count || 0) < 3
+}
+
+function lineAvailability(lines, tier, species, unlocks) {
+  if (!lines || knownTiers.indexOf(String(tier)) < 0) return { available: 0, total: 0 }
+  var peak = unlocks === undefined || unlocks === null ? 3
+    : Math.max(0, Math.min(3, Number(unlocks)))
+  var total = 0
+  var available = 0
+  for (var i = 0; i < knownEvents.length; i++) {
+    var merged = mergeLines(lines, String(tier), knownEvents[i], String(species || ""))
+    for (var j = 0; j < merged.length; j++) {
+      var line = asLine(merged[j])
+      if (!line || !isFinite(line.minPeakTier) || line.minPeakTier < 0 || line.minPeakTier > 3)
+        continue
+      total++
+      if (line.minPeakTier <= peak) available++
+    }
+  }
+  return { available: available, total: total }
 }
 
 function validText(text) {

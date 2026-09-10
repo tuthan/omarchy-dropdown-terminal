@@ -177,6 +177,7 @@ function planStep(input) {
   var cycleMs = durationTotal(input.durations || input.walkDurations, 440)
   var speed = stride * renderScale / cycleMs * 1000
   var approach = input.towardU !== undefined && isFinite(Number(input.towardU))
+  var stepScale = clamp(finite(input.stepScale, 1), 0.5, 4)
   var requestedDistance = 0
   var travelDirection = direction
   if (approach) {
@@ -199,7 +200,7 @@ function planStep(input) {
       ? edgeEndDistance - currentDistance : currentDistance - edgeStartDistance
   } else {
     var stepCount = 3 + Math.floor(randomValue(input.random, "step", 0.5) * 10)
-    requestedDistance = stepCount * stride
+    requestedDistance = stepCount * stride * stepScale
     // A wall/ledge step is deliberately one authored step to the corner. This
     // keeps a side from pausing on a floor frame before changing posture.
     if ((edge === "right" || edge === "left") && allowedEdges.length > 1 && input.wallStep === true)
@@ -241,6 +242,7 @@ function planStep(input) {
     distancePx: travelDistance,
     distanceToBoundaryPx: distanceToBoundary,
     stride: stride,
+    stepScale: stepScale,
     cycleMs: cycleMs,
     speedPxPerSecond: speed,
     durationMs: Math.max(0, Math.round(travelDistance / speed * 1000)),

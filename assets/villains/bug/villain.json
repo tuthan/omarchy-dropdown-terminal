@@ -1,0 +1,19 @@
+{
+  "kind": "villain",
+  "version": 1,
+  "name": "Bug",
+  "author": "OpenAI image generation tool",
+  "source": "Original pixel-art atlas generated for Dropdown Terminal on 2026-09-10; see SOURCE.",
+  "license": "MIT-compatible project asset; see LICENSE.",
+  "atlas": {"path": "villain.png", "frameWidth": 32, "frameHeight": 32, "columns": 8, "rows": 4, "renderScale": 1},
+  "actions": {
+    "appear": {"frames": [0, 1], "durations": [180, 180], "loop": false, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "idle": {"frames": [2, 3, 4], "durations": [600, 180, 600], "loop": true, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "walk": {"frames": [5, 6, 7, 8], "durations": [125, 125, 125, 125], "loop": true, "mirrorSafe": true, "stride": 10, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "taunt": {"frames": [9, 10], "durations": [220, 220], "loop": true, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "flee": {"frames": [11, 12, 13], "durations": [160, 160, 160], "loop": false, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "defeated": {"frames": [14, 15], "durations": [300, 300], "loop": false, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "vanish": {"frames": [16, 17], "durations": [120, 120], "loop": false, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]}
+  },
+  "fallbacks": {"taunt": "idle", "flee": "vanish", "defeated": "vanish"}
+}

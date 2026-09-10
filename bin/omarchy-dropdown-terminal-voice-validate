@@ -20,7 +20,7 @@ valid_line='def valid_line:
     and (test("[[:cntrl:]]") | not)
     and (contains("$") | not) and (contains("`") | not)
     and (gsub("\\{status\\}|\\{duration\\}"; "") | test("[{}]") | not)));'
-events=(failed succeeded petting idle)
+events=(failed succeeded petting idle villainAppear victory assisted defeat)
 tiers=(Kind Sassy Savage)
 for tier in "${tiers[@]}"; do
   jq -e --arg tier "$tier" '.tiers[$tier] | type == "object"' "$lines_file" >/dev/null \
@@ -32,7 +32,7 @@ for tier in "${tiers[@]}"; do
       exit 1
     fi
   done
-  unknown="$(jq -r --arg tier "$tier" '.tiers[$tier] | keys[] | select((["failed","succeeded","petting","idle"] | index(.)) == null)' "$lines_file")"
+  unknown="$(jq -r --arg tier "$tier" '.tiers[$tier] | keys[] | select((["failed","succeeded","petting","idle","villainAppear","victory","assisted","defeat"] | index(.)) == null)' "$lines_file")"
   [[ -z "$unknown" ]] || { echo "tiers.$tier.$unknown is unknown" >&2; exit 1; }
 done
 

@@ -16,7 +16,7 @@ Item {
   readonly property bool audioEnabled: ["Quiet", "Normal"].indexOf(root.level) >= 0
 
   function cuePath(cue) {
-    var name = ["pet", "success", "failure", "land"].indexOf(String(cue)) >= 0
+    var name = ["pet", "success", "failure", "land", "villain", "victory"].indexOf(String(cue)) >= 0
       ? String(cue) : ""
     return name ? Qt.resolvedUrl("assets/sounds/" + name + ".ogg").toString()
       .replace(/^file:\/\//, "") : ""

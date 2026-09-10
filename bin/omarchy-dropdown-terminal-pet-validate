@@ -6,7 +6,7 @@ set -u
 export LC_ALL=C
 
 usage() {
-  printf 'usage: %s validate PACK_DIR\n' "${0##*/}" >&2
+  printf 'usage: %s validate [pet|villain] PACK_DIR\n' "${0##*/}" >&2
   exit 2
 }
 
@@ -20,7 +20,19 @@ pass() {
   exit 0
 }
 
-[[ "${1:-}" == "validate" ]] && shift
+kind=pet
+if [[ "${1:-}" == "validate" ]]; then shift; fi
+if [[ "${1:-}" == "--kind" ]]; then
+  kind="${2:-}"
+  shift 2
+elif [[ "${1:-}" == --kind=* ]]; then
+  kind="${1#--kind=}"
+  shift
+elif [[ "${1:-}" == "pet" || "${1:-}" == "villain" ]]; then
+  kind="$1"
+  shift
+fi
+[[ "$kind" == "pet" || "$kind" == "villain" ]] || usage
 pack_input="${1:-}"
 [[ -n "$pack_input" && -d "$pack_input" ]] || usage
 [[ ! -L "$pack_input" ]] || fail "pack directory is a symlink"
@@ -30,8 +42,10 @@ pack_dir="$(realpath -e -- "$pack_input")" || fail "pack directory is not canoni
 pack_mode="$(stat -c '%a' -- "$pack_dir" 2>/dev/null || printf 0)"
 [[ "$pack_mode" =~ ^[0-7]+$ ]] || fail "pack directory mode is unreadable"
 (( (8#$pack_mode & 022) == 0 )) || fail "pack directory is writable by group or others"
-manifest="$pack_dir/pet.json"
-[[ -f "$manifest" && ! -L "$manifest" ]] || fail "pet.json is missing or a symlink"
+manifest_name="pet.json"
+[[ "$kind" == "villain" ]] && manifest_name="villain.json"
+manifest="$pack_dir/$manifest_name"
+[[ -f "$manifest" && ! -L "$manifest" ]] || fail "$manifest_name is missing or a symlink"
 
 max_json=131072
 max_png=4194304
@@ -72,6 +86,110 @@ done < <(find -P "$pack_dir" -mindepth 1 -print0)
 (( pack_total <= max_total )) || fail "pack exceeds the total size limit"
 
 command -v identify >/dev/null 2>&1 || fail "PNG decoder identify is unavailable"
+
+if [[ "$kind" == "villain" ]]; then
+  manifest_size="$(stat -c '%s' -- "$manifest" 2>/dev/null || printf 0)"
+  (( manifest_size <= max_json )) || fail "villain.json exceeds the size limit"
+
+  manifest_version="$(jq -r '.version // empty' "$manifest" 2>/dev/null || true)"
+  manifest_kind="$(jq -r '.kind // empty' "$manifest" 2>/dev/null || true)"
+  [[ "$manifest_version" == "1" && "$manifest_kind" == "villain" ]] \
+    || fail "villain manifest must declare kind villain and version 1"
+
+  villain_json_ok=''
+  if ! villain_json_ok="$(jq -e '
+    def pathok:
+      type == "string" and length > 0 and length <= 128
+      and (startswith("/") | not) and (contains("..") | not)
+      and (test("[[:cntrl:]]") | not);
+    def seqok($max_frame; $low; $high; $min; $max):
+      type == "object"
+      and ((.frames | type) == "array" and (.frames | length) >= $min and (.frames | length) <= $max)
+      and ((.durations | type) == "array") and ((.anchors | type) == "array")
+      and ((.frames | length) == (.durations | length))
+      and ((.frames | length) == (.anchors | length))
+      and ((.loop | type) == "boolean") and ((.mirrorSafe | type) == "boolean")
+      and all(.frames[]; type == "number" and . == floor and . >= 0 and . <= $max_frame)
+      and all(.durations[]; type == "number" and . == floor and . >= $low and . <= $high)
+      and all(.anchors[]; type == "object"
+        and ((.x | type) == "number" and .x >= 0 and .x <= 32)
+        and ((.y | type) == "number" and .y >= 0 and .y <= 32))
+      and (([.durations[]] | add) <= 12000 or .loop);
+    def total($name): ([.actions[$name].durations[]] | add);
+    . as $root |
+    .version == 1 and .kind == "villain"
+    and (.name | type == "string" and length > 0 and length <= 128)
+    and all(["author", "source", "license"][];
+      . as $name | $root[$name] | type == "string" and length > 0 and length <= 256)
+    and ((.atlas | type) == "object") and (.atlas.path | pathok)
+    and (.atlas.frameWidth == 32 and .atlas.frameHeight == 32)
+    and ((.atlas.columns | type) == "number" and .atlas.columns == (.atlas.columns | floor) and .atlas.columns >= 1 and .atlas.columns <= 8)
+    and ((.atlas.rows | type) == "number" and .atlas.rows == (.atlas.rows | floor) and .atlas.rows >= 1 and .atlas.rows <= 4)
+    and ((.atlas.renderScale | type) == "number" and .atlas.renderScale == (.atlas.renderScale | floor) and .atlas.renderScale >= 1 and .atlas.renderScale <= 4)
+    and (.atlas.columns * .atlas.rows <= 32)
+    and ((.actions | type) == "object")
+    and all(["appear", "idle", "walk", "taunt", "flee", "defeated", "vanish"][];
+      . as $name | $root.actions[$name]
+      | seqok(($root.atlas.columns * $root.atlas.rows) - 1; 16; 4000; 1; 16))
+    and (.actions.appear.loop == false and total("appear") <= 400)
+    and (.actions.idle.loop == true)
+    and (.actions.walk.loop == true and ((.actions.walk.stride | type) == "number")
+      and .actions.walk.stride >= 4 and .actions.walk.stride <= 32)
+    and ((.actions.walk.stride * .atlas.renderScale * 1000 / total("walk")) >= 12
+      and (.actions.walk.stride * .atlas.renderScale * 1000 / total("walk")) <= 60)
+    and (.actions.taunt.loop == true and (.actions.taunt.frames | length) >= 2
+      and (.actions.taunt.frames | length) <= 6)
+    and (.actions.flee.loop == false and total("flee") <= 600)
+    and (.actions.defeated.loop == false and total("defeated") <= 900)
+    and (.actions.vanish.loop == false and total("vanish") <= 300)
+    and all(["taunt", "flee", "defeated"][]; . as $name |
+      $root.fallbacks[$name] | type == "string")
+    and ($root.fallbacks | type == "object" and length == 3
+      and .taunt == "idle" and .flee == "vanish" and .defeated == "vanish")
+    and all(["appear", "idle", "walk", "taunt", "flee", "defeated", "vanish"][];
+      . as $name | all($root.actions[$name].anchors[]; .x == 16 and .y >= 24 and .y <= 32))
+    and (if .actions.climb == null then true else
+      (.actions.climb.loop == true and .actions.climb.mirrorSafe == true
+        and (.actions.climb.stride | type == "number" and . == floor and . >= 4 and . <= 32)
+        and all(.actions.climb.anchors[]; .x >= 0 and .x <= 6 and .y >= 12 and .y <= 20)) end)
+    and (if .actions.hang == null then true else
+      (.actions.hang.loop == true and .actions.hang.mirrorSafe == true
+        and (.actions.hang.stride | type == "number" and . == floor and . >= 4 and . <= 32)
+        and all(.actions.hang.anchors[]; .x == 16 and .y >= 0 and .y <= 4)) end)
+  ' "$manifest")"; then
+    fail "villain.json failed schema validation"
+  fi
+
+  relative_villain_file() {
+    local relative="$1"
+    [[ "$relative" != /* && "$relative" != *..* && "$relative" != *$'\n'* && "$relative" != *$'\r'* ]] \
+      || fail "unsafe villain asset path"
+    local candidate="$pack_dir/$relative"
+    [[ -e "$candidate" && ! -L "$candidate" && -f "$candidate" ]] \
+      || fail "villain asset is missing, non-regular, or a symlink"
+    [[ ! -x "$candidate" ]] || fail "villain asset is executable"
+    local canonical
+    canonical="$(realpath -e -- "$candidate")" || fail "villain asset path is not canonical"
+    [[ "$canonical" == "$pack_dir"/* ]] || fail "villain asset escapes the pack directory"
+    printf '%s\n' "$canonical"
+  }
+
+  villain_atlas_path="$(jq -r '.atlas.path' "$manifest")"
+  villain_atlas_width="$(jq -r '.atlas.frameWidth * .atlas.columns' "$manifest")"
+  villain_atlas_height="$(jq -r '.atlas.frameHeight * .atlas.rows' "$manifest")"
+  villain_atlas="$(relative_villain_file "$villain_atlas_path")"
+  [[ "$(basename "$villain_atlas")" == "villain.png" ]] \
+    || fail "villain atlas must be villain.png"
+  for provenance in LICENSE SOURCE; do
+    relative_villain_file "$provenance" >/dev/null
+  done
+  (( $(stat -c '%s' -- "$villain_atlas") <= max_png )) || fail "villain atlas exceeds the size limit"
+  villain_image_info="$(identify -quiet -format '%m %w %h' -- "$villain_atlas" 2>/dev/null)" \
+    || fail "villain PNG cannot be decoded"
+  [[ "$villain_image_info" == "PNG $villain_atlas_width $villain_atlas_height" ]] \
+    || fail "villain PNG dimensions do not match the manifest"
+  pass "$pack_dir"
+fi
 
 manifest_size="$(stat -c '%s' -- "$manifest" 2>/dev/null || printf 0)"
 (( manifest_size <= max_json )) || fail "pet.json exceeds the size limit"

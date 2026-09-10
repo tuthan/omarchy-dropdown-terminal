@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.3.0
+
+- Add precise-failure villain encounters with bundled bug and ghost packs,
+  bounded 14-second resolution, input-safe interaction, interruption cleanup,
+  and encounter voice/sound cues.
+- Add per-species bond memory with daily petting/celebration caps, bounded
+  decay, bravery odds, visible tiers, and a confirmed reset action.
+- Add friendship-based voice unlocks and rare Inseparable idle happiness;
+  existing 2.2 tone lines remain available at every bond tier.
+- Add a `Playful` pet activity mode with faster idle decisions, longer route
+  steps, and no idle sleep while the terminal is visible.
+
 ## 2.2.0
 
 - Add room-aware whole-border pet roaming with wall, descending-climb, ledge,

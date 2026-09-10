@@ -6,20 +6,23 @@ Source lineage: the shared rules generalize [OmaSafe design principles and langu
 
 Reviewed against:
 
-- Plugin manifest version: 1.4.2
+- Plugin manifest version: 2.3.0
 - Repository baseline: `c56ffad` at the 2026-09-04 research pass
 - Omarchy: 4.0.2
 - Hyprland: 0.56.2
 - Quickshell: 0.3.1
 - Review date: 2026-09-04
 
-This profile is binding for the implementation plan under [`docs/plan/`](plan/README.md). A phase is not complete until its listed PD rules and project exceptions pass.
+This profile is intentionally retained in the plugin repository as its binding
+design-principles/profile document. The project-tied companion documents and
+phase plan now live in the Obsidian vault under `yadtm-Plugin/`. A phase is not
+complete until its listed PD rules and project exceptions pass.
 
 Companion project documents, which record project-tied facts rather than restating shared rules:
 
-- [`architecture-invariants.md`](architecture-invariants.md) — engineering invariants A1–A12 specific to this plugin, each mapped to the PD rule or host constraint it serves.
-- [`host-verification.md`](host-verification.md) — evidence that the shared host constraints hold at the versions above, plus host facts flagged for promotion upstream.
-- [`known-issues.md`](known-issues.md) — latent defects found by review, each mapped to the rule it violates.
+- [`architecture-invariants.md`](../../docs-vault/yadtm-Plugin/architecture-invariants.md) — engineering invariants A1–A12 specific to this plugin, each mapped to the PD rule or host constraint it serves.
+- [`host-verification.md`](../../docs-vault/yadtm-Plugin/host-verification.md) — evidence that the shared host constraints hold at the versions above, plus host facts flagged for promotion upstream.
+- [`known-issues.md`](../../docs-vault/yadtm-Plugin/known-issues.md) — latent defects found by review, each mapped to the rule it violates.
 - [`README.md`](README.md) — which document a new fact belongs in.
 
 ## Applicability matrix
@@ -37,7 +40,7 @@ Companion project documents, which record project-tied facts rather than restati
 | PD9 Semantic state uses word, shape, and color together | Required with EX-2 | Bar space may show only a glyph/shape plus color, but accessible text/tooltip names `running`, `attention`, `succeeded`, or `failed`; these states remain distinct in monochrome. | Desaturated screenshots and tooltip/accessibility checks for every icon state. |
 | PD10 The theme owns surfaces | Required | Panel and overlays derive palette, border, radius, and scale from the active theme/host. No fixed-theme plate or hardcoded semantic hex color. | Light, dark, square-corner, thick-border, translucent, and high-contrast theme passes at scale 1 and fractional scale. |
 | PD11 Motion explains change and stops with its surface | Required with EX-1 | Every glow/pet/icon animation has a trigger, duration, generation/cancellation rule, reduced-motion behavior, and hidden cleanup. No process runs per frame or prompt except builtin journal append. | Interrupt every action with hide/close/reload; inspect layers/timers/processes and idle CPU/RSS afterward. |
-| PD12 One interaction model; input and focus are explicit | Required | Phase 6 extends the Phase 5 profile row: the overlay is non-focusable and click-through except for the union of the pet sprite and optional gaze halo while `petInteraction` is enabled. That union subtracts the terminal client rectangle grown by `general:border_size + general:extend_border_grab_area` when `resize_on_border` is enabled, and by `general:border_size` otherwise, so resize handles remain terminal input without shrinking the pet target for an inactive ring. Pixels inside an enabled halo belong to the pet surface and therefore reach neither the desktop nor a window behind it; the halo defaults to `Off`. Only the pet surface carries a region; keyboard focus remains `WlrKeyboardFocus.None`. Helper locking guarantees one mutation across per-screen instances. | Keyboard/pointer/pass-through, held-key, focus-loss, resize-grab, multiple-screen duplicate, halo, and model-refresh tests. |
+| PD12 One interaction model; input and focus are explicit | Required | Phase 6 extends the Phase 5 profile row: the overlay is non-focusable and click-through except for the union of the pet sprite, optional gaze halo, and visible villain rectangle while `petInteraction` is enabled. That union subtracts the terminal client rectangle grown by `general:border_size + general:extend_border_grab_area` when `resize_on_border` is enabled, and by `general:border_size` otherwise, so resize handles remain terminal input without shrinking the pet target for an inactive ring. Pixels inside an enabled halo or villain rectangle belong to the pet surface and therefore reach neither the desktop nor a window behind it; the halo defaults to `Off`. Only the pet surface carries a region; keyboard focus remains `WlrKeyboardFocus.None`. Helper locking guarantees one mutation across per-screen instances. | Keyboard/pointer/pass-through, held-key, focus-loss, resize-grab, villain input, multiple-screen duplicate, halo, and model-refresh tests. |
 
 ## State and authority inventory
 
@@ -50,6 +53,7 @@ Companion project documents, which record project-tied facts rather than restati
 | Precise running/result state | append-only runtime event journal | shell builtin hooks plus helper lifecycle events | `Not configured` when adapter absent; malformed records skipped and counted diagnostically | Async `FileView.reload()`, offset/tail reducer, 1 Hz re-probe only while a command is running |
 | Pet action/asset state | validated `pet.json` and bundled PNG | bundled pack; one-shot validator for external packs | Bundled penguin fallback or pet disabled with a concise unavailable/unsupported reason | Validate on selection/change; never on a frame path |
 | Pet position | `<state root>/io.github.tuthan.dropdown-terminal.pet-state.json` | The `Service.qml` instance whose screen hosts the terminal, via `FileView` atomic writes | Missing, invalid, future-version, stale, or species-mismatched documents are ignored; the pet enters at its default position; debug log only | Read once on layer creation and after owner/config changes; settle writes are coalesced to 2 s and carry a monotonic revision |
+| Pet bond | `${XDG_STATE_HOME:-~/.local/state}/io.github.tuthan.dropdown-terminal/bond.json` | The `Service.qml` instance whose screen hosts the terminal, via `FileView` atomic writes and delta read-modify-write | Missing → all bundled species start at 0 / `Wary`; invalid, unreadable, or future-version → panel shows `Bond: Unavailable` and all writes are discarded | Read on load and `FileView` change; ownership hand-off flushes the old writer, the new owner reloads before writing, and queued deltas are coalesced to 2 s and forced on hide |
 | Tab membership/active tab | runtime JSON reconciled with `hyprctl -j clients` group data | helper under nonblocking mutation lock | `Off` or experimental unavailable; existing single terminal remains usable | Reconcile before/after each action and after compositor/shell reload |
 
 ## External mutation inventory
@@ -69,7 +73,7 @@ Plugin-local visual settings (`entranceEffect`, pet settings, intensity, reduced
 ### EX-1 — Product-specific decorative rendering
 
 - Rules affected: PD6 and PD11.
-- Scope: the terminal border glow/embers, bounded particles, pixel-art pet sprite, and its contact/effect layers only. Settings panels and controls remain host-native.
+- Scope: the terminal border glow/embers, bounded particles, pixel-art pet and villain sprites, bond progress track, and their contact/effect layers only. Settings panels and controls remain host-native.
 - Reason: the Omarchy UI kit has no border-following effect or sprite primitive; these visuals are the product feature rather than replacement panel chrome.
 - Compensating checks: colors/radius/scale derive from host/theme; input region is empty; particle/frame/timer counts are bounded; reduced motion is complete; all activity stops and the layer unmaps while hidden.
 - Review/removal condition: inventory every custom primitive per release. Remove or simplify any effect that cannot pass click-through, theme, fractional-scale, interruption, or idle-baseline tests.
@@ -86,14 +90,14 @@ Plugin-local visual settings (`entranceEffect`, pet settings, intensity, reduced
 
 | Phase | Binding rules | Additional gate |
 |---|---|---|
-| [0 — foundation](plan/phase-0-foundation.md) | PD2, PD3, PD4, PD5, PD11, PD12 | Authority/failure inventory and external-mutation behavior are testable before feature work. |
-| [1 — entrance effects](plan/phase-1-entrance-effects.md) | PD1, PD6, PD9, PD10, PD11, PD12; EX-1 | Theme, input, fractional geometry, reduced/off path, and idle cleanup pass. |
-| [2 — command indicator](plan/phase-2-command-indicator.md) | PD1–PD5, PD7, PD9, PD11, PD12; EX-2 | Urgency is labeled generically; shell integration has cancel-first exact confirmation and privacy/rollback checks. |
-| [3 — pet](plan/phase-3-pet.md) | PD1, PD6, PD7, PD9–PD12; EX-1 | Decorative actions cannot impersonate command state; assets, anchors, interruptions, and hidden cleanup pass. |
-| [4 — tabs](plan/phase-4-tabs.md) | PD2–PD5, PD7–PD12 | Experimental limitations stay visible; no foreign group/window or global style is mutated implicitly. |
-| [5 — pet interaction](plan/phase-5-pet-interaction.md) | PD1, PD6, PD7, PD9–PD12; EX-1 | Motion uses authored stride timing; the bounded pet input region preserves terminal resize handles and never takes keyboard focus. |
-| [6 — pet world](plan/phase-6-pet-world.md) | PD1–PD4, PD6, PD7, PD9–PD12; EX-1 | Voice lines derive only from precise qualifying events; the input-region union (pet, optional halo) still subtracts the terminal and its resize ring; the position document has one writer; sound is absent as process and library when off. |
-| [7 — pet villains](plan/phase-7-pet-villains.md) | PD1–PD4, PD6, PD7, PD9–PD12; EX-1 | Villains derive only from precise qualifying failures the user saw; the villain rectangle joins the region union under the same subtraction; the bond document has one writer and a visible unavailable state; every encounter path ends on a bound or the first interrupt. |
+| [0 — foundation](../../docs-vault/yadtm-Plugin/plan/phase-0-foundation.md) | PD2, PD3, PD4, PD5, PD11, PD12 | Authority/failure inventory and external-mutation behavior are testable before feature work. |
+| [1 — entrance effects](../../docs-vault/yadtm-Plugin/plan/phase-1-entrance-effects.md) | PD1, PD6, PD9, PD10, PD11, PD12; EX-1 | Theme, input, fractional geometry, reduced/off path, and idle cleanup pass. |
+| [2 — command indicator](../../docs-vault/yadtm-Plugin/plan/phase-2-command-indicator.md) | PD1–PD5, PD7, PD9, PD11, PD12; EX-2 | Urgency is labeled generically; shell integration has cancel-first exact confirmation and privacy/rollback checks. |
+| [3 — pet](../../docs-vault/yadtm-Plugin/plan/phase-3-pet.md) | PD1, PD6, PD7, PD9–PD12; EX-1 | Decorative actions cannot impersonate command state; assets, anchors, interruptions, and hidden cleanup pass. |
+| [4 — tabs](../../docs-vault/yadtm-Plugin/plan/phase-4-tabs.md) | PD2–PD5, PD7–PD12 | Experimental limitations stay visible; no foreign group/window or global style is mutated implicitly. |
+| [5 — pet interaction](../../docs-vault/yadtm-Plugin/plan/phase-5-pet-interaction.md) | PD1, PD6, PD7, PD9–PD12; EX-1 | Motion uses authored stride timing; the bounded pet input region preserves terminal resize handles and never takes keyboard focus. |
+| [6 — pet world](../../docs-vault/yadtm-Plugin/plan/phase-6-pet-world.md) | PD1–PD4, PD6, PD7, PD9–PD12; EX-1 | Voice lines derive only from precise qualifying events; the input-region union (pet, optional halo) still subtracts the terminal and its resize ring; the position document has one writer; sound is absent as process and library when off. |
+| [7 — pet villains](../../docs-vault/yadtm-Plugin/plan/phase-7-pet-villains.md) | PD1–PD4, PD6, PD7, PD9–PD12; EX-1 | Villains derive only from precise qualifying failures the user saw; the villain rectangle joins the region union under the same subtraction; the bond document has one writer and a visible unavailable state; every encounter path ends on a bound or the first interrupt. |
 
 ## Project review checklist
 

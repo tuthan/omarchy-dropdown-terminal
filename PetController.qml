@@ -33,6 +33,11 @@ Item {
   property var motionItem: null
   property var spriteItem: null
   property var effectsItem: null
+  property var encounterItem: null
+  property var pendingEncounter: null
+  property bool encounterPetPressActive: false
+  property double lastEncounterEndedAt: 0
+  property var encounterVoiceEvents: []
   property bool petPressActive: false
   property int petPressGeneration: -1
   property double petPressedAt: 0
@@ -67,7 +72,7 @@ Item {
   property var soundItem: null
 
   readonly property var priorityOrder: ["hidden/closed", "invalid geometry", "enter/exit",
-    "failure", "success", "petting/carried", "first-focus dance", "corner/climb",
+    "encounter", "failure", "success", "petting/carried", "first-focus dance", "corner/climb",
     "walking", "idle/sleep"]
   readonly property bool petEnabledActive: service ? service.petEnabled === true : false
   readonly property string species: service ? service.petSpecies : "Penguin"
@@ -82,6 +87,7 @@ Item {
   readonly property string petVoice: service ? service.petVoice : "Off"
   readonly property string petSound: service ? service.petSound : "Off"
   readonly property bool petRememberPosition: service ? service.petRememberPosition !== false : true
+  readonly property bool petVillains: service ? service.petVillains !== false : true
   readonly property bool positionReadReady: !root.petRememberPosition
     || (!!root.service && root.service.petStateReadReady === true)
   readonly property bool hostMatchesTerminal: !!hostScreen && !!service && !!service.terminalMonitor
@@ -110,6 +116,9 @@ Item {
     ? "Voice unavailable: bundled lines could not be read" : ""
   readonly property string soundDiagnostic: root.petSound !== "Off" && root.soundItem
     && root.soundItem.diagnostic !== "" ? root.soundItem.diagnostic : ""
+  readonly property bool encounterRunning: !!root.encounterItem && root.encounterItem.running === true
+  readonly property string encounterDiagnostic: root.encounterRunning && root.encounterItem.diagnostic
+    ? String(root.encounterItem.diagnostic) : ""
   readonly property real clickableExtent: {
     if (!root.motionItem || !root.spriteItem) return 0
     var margin = service ? Number(service.grabMargin) : 17
@@ -182,15 +191,31 @@ Item {
     noticeHoldTimer.stop()
     hoverExitTimer.stop()
     hoverDwellTimer.stop()
+    encounterQueueTimer.stop()
+    happyTimeout.stop()
+  }
+
+  function interruptEncounter() {
+    if (!root.encounterRunning || !root.encounterItem) return false
+    root.encounterItem.interrupt()
+    // An interrupted encounter still counts as the most recent encounter for
+    // the spawn cooldown. This keeps hide, resize, and drag from becoming a
+    // way to trigger repeated villain arrivals.
+    root.lastEncounterEndedAt = Date.now()
+    root.encounterPetPressActive = false
+    return true
   }
 
   function invalidate() {
+    root.interruptEncounter()
     root.generation++
     root.actionGeneration = root.generation
     root.nextState = "hidden"
     root.stopAnimations()
     root.petPressActive = false
     root.petPressGeneration = -1
+    root.encounterPetPressActive = false
+    root.pendingEncounter = null
     root.dragging = false
     root.dragGeneration = -1
     if (root.motionItem) {
@@ -233,11 +258,61 @@ Item {
     }
     root.voiceLines.facts = facts
     var line = PetVoice.pickLine(root.voiceLines, root.petVoice, event, root.species,
-      root.effectsItem.recentVoiceLines || [], root.nextRandom(), 3)
+      root.effectsItem.recentVoiceLines || [], root.nextRandom(),
+      root.service && typeof root.service.bondPeakTier === "function"
+        ? root.service.bondPeakTier(root.species) : 0)
     if (!line) return
     root.lastVoiceAt = Date.now()
     root.effectsItem.recentVoiceLines = (root.effectsItem.recentVoiceLines || []).concat([line]).slice(-5)
     root.effectsItem.showBubble(line, root.motionItem ? root.motionItem.edge : "top")
+  }
+
+  function showEncounterVoice(event, villainKind) {
+    if (!root.encounterItem || !root.encounterItem.running || root.petVoice === "Off"
+        || !root.voiceReady || !root.voiceLines || !root.effectsItem) return
+    if (!PetVoice.encounterLineAllowed(event, root.encounterVoiceEvents,
+        root.encounterVoiceEvents.length)) return
+    var facts = {
+      status: root.service ? root.service.commandLatestStatus : "?",
+      duration: root.service ? root.durationBucket(root.service.commandLatestDurationMs) : "unknown duration",
+      villain: String(villainKind || "villain")
+    }
+    root.voiceLines.facts = facts
+    var line = PetVoice.pickLine(root.voiceLines, root.petVoice, event, root.species,
+      root.effectsItem.recentVoiceLines || [], root.nextRandom(),
+      root.service && typeof root.service.bondPeakTier === "function"
+        ? root.service.bondPeakTier(root.species) : 0)
+    if (!line) return
+    root.encounterVoiceEvents = root.encounterVoiceEvents.concat([String(event)])
+    root.lastVoiceAt = Date.now()
+    root.effectsItem.recentVoiceLines = (root.effectsItem.recentVoiceLines || [])
+      .concat([line]).slice(-5)
+    root.effectsItem.showBubble(line, root.motionItem ? root.motionItem.edge : "top")
+  }
+
+  function playEncounterSound(cue) {
+    if (root.soundItem && typeof root.soundItem.play === "function") root.soundItem.play(cue)
+  }
+
+  function voiceAvailability(speciesName) {
+    if (!root.voiceReady || !root.voiceLines || root.petVoice === "Off")
+      return { available: 0, total: 0 }
+    var name = String(speciesName || root.species)
+    var peak = root.service && typeof root.service.bondPeakTier === "function"
+      ? root.service.bondPeakTier(name) : 0
+    return PetVoice.lineAvailability(root.voiceLines, root.petVoice, name, peak)
+  }
+
+  function loadVoiceDocument(raw) {
+    try {
+      var parsed = JSON.parse(String(raw || ""))
+      var report = PetVoice.validateDocument(parsed)
+      root.voiceReady = report.valid
+      root.voiceLines = report.valid ? parsed : null
+    } catch (e) {
+      root.voiceReady = false
+      root.voiceLines = null
+    }
   }
 
   function actionFamily(edge) {
@@ -272,6 +347,7 @@ Item {
       root.spriteItem.playbackRequested = !root.reduceMotion
     }
     root.spriteItem.restartSequence()
+    if (root.tryStartQueuedEncounter()) return
     root.maybeCelebrateQueued()
     if (root.petState !== "idle") return
     if (root.returningToRemembered && root.returnTargetU >= 0
@@ -298,6 +374,146 @@ Item {
     return Math.random()
   }
 
+  function currentBond() {
+    return root.service && typeof root.service.bondValue === "function"
+      ? Number(root.service.bondValue(root.species)) : 0
+  }
+
+  function encounterVillainKind(status) {
+    return Number(status) >= 128 ? "ghost" : "bug"
+  }
+
+  function encounterEligible() {
+    return root.petVillains && !root.reduceMotion && root.petInteraction
+      && root.active && root.positionReadReady && root.service
+      && root.service.terminalVisible === true && root.hostMatchesTerminal
+      && root.service.commandTracking === true
+      && root.service.commandIntegrationInstalled === true
+      && root.service.eventReplayReady === true
+      && root.interactionEnabled && !!root.encounterItem
+  }
+
+  function beginEncounter(villainKind, status) {
+    if (!root.encounterEligible() || root.encounterRunning
+        || Date.now() - root.lastEncounterEndedAt < 90000
+        || root.petState !== "idle" || !root.motionItem || root.motionItem.edge !== "top") return false
+    root.generation++
+    var token = root.generation
+    root.stopAnimations()
+    root.petPressActive = false
+    root.petPressGeneration = -1
+    root.encounterPetPressActive = false
+    root.effectsItem.cancel()
+    root.encounterVoiceEvents = []
+    root.petState = "encounter"
+    root.nextState = "idle"
+    root.actionGeneration = token
+    if (root.encounterItem.begin(villainKind, status, token)) return true
+    root.petState = "idle"
+    root.enterIdle()
+    return false
+  }
+
+  function queueOrdinaryFailure() {
+    if (root.pendingReaction !== "failure") {
+      root.pendingReaction = "failure"
+      root.pendingReactionHidden = false
+    }
+    if (root.petState === "idle") root.maybeCelebrateQueued()
+  }
+
+  function requestEncounter(status) {
+    if (!root.encounterEligible() || root.encounterRunning
+        || Date.now() - root.lastEncounterEndedAt < 90000) return false
+    if (root.petState === "idle" && root.motionItem && root.motionItem.edge === "top") {
+      if (root.beginEncounter(root.encounterVillainKind(status), status)) return true
+      root.queueOrdinaryFailure()
+      return true
+    }
+    root.pendingEncounter = {
+      villainKind: root.encounterVillainKind(status),
+      status: Number(status),
+      queuedAt: Date.now()
+    }
+    if (root.petState === "idle" && root.motionItem && root.motionItem.edge !== "top"
+        && !root.returningToRemembered) root.startReentry()
+    // startReentry() stops all controller timers as an action boundary, so
+    // arm the queue after it has moved the pet toward the floor.
+    encounterQueueTimer.restart()
+    return true
+  }
+
+  function tryStartQueuedEncounter() {
+    var pending = root.pendingEncounter
+    if (!pending) return false
+    if (!root.encounterEligible()) {
+      root.pendingEncounter = null
+      encounterQueueTimer.stop()
+      return false
+    }
+    if (Date.now() - Number(pending.queuedAt || 0) > 20000) {
+      // The user saw the failure, but the encounter missed its idle window;
+      // do not replay a stale villain or an ordinary failure after the queue.
+      root.pendingEncounter = null
+      encounterQueueTimer.stop()
+      return false
+    }
+    if (Date.now() - root.lastEncounterEndedAt < 90000) return false
+    if (root.petState !== "idle" || !root.motionItem) return false
+    if (root.motionItem.edge !== "top") {
+      if (!root.returningToRemembered) {
+        root.startReentry()
+        encounterQueueTimer.restart()
+      }
+      return false
+    }
+    root.pendingEncounter = null
+    encounterQueueTimer.stop()
+    if (root.beginEncounter(pending.villainKind, pending.status)) return true
+    root.queueOrdinaryFailure()
+    return false
+  }
+
+  function finishEncounter(result, token) {
+    if (Number(token) !== Number(root.generation) || Number(token) !== Number(root.actionGeneration)) return
+    if (result === "won" || result === "assisted" || result === "lost") {
+      if (root.service && typeof root.service.queueBondDelta === "function") {
+        var bondKind = result === "won" ? "win" : (result === "assisted" ? "assist" : "loss")
+        root.service.queueBondDelta(root.species, bondKind)
+      }
+      if (root.effectsItem) root.effectsItem.burst("puff")
+    } else if (result === "skip" && root.effectsItem) {
+      root.effectsItem.burst("puff")
+    } else if (result === "no-room" || result === "unavailable" || result === "deadline") {
+      root.queueOrdinaryFailure()
+    }
+    root.lastEncounterEndedAt = Date.now()
+    root.encounterPetPressActive = false
+    root.petState = "idle"
+    root.nextState = "idle"
+    root.actionGeneration = root.generation
+    root.enterIdle()
+  }
+
+  function beginEncounterSequence(action, token) {
+    if (!root.encounterRunning || Number(token) !== Number(root.generation)
+        || !root.active || !root.spriteItem) return
+    root.actionGeneration = Number(token)
+    root.nextState = "idle"
+    root.petState = String(action || "alert")
+    root.spriteItem.actionName = root.spriteItem.actions[root.petState]
+      ? root.petState : "idle"
+    root.spriteItem.playbackRequested = true
+    root.spriteItem.restartSequence()
+    if (root.petState === "victory") {
+      // The hard encounter deadline can fire before a long authored victory
+      // sequence emits its normal callback. Start the success cue at the
+      // stage boundary so a precise success is never visually dropped.
+      if (root.effectsItem) root.effectsItem.burst("success")
+      if (root.soundItem) root.soundItem.play("success")
+    }
+  }
+
   function beginSequence(action, after, token) {
     if (token !== root.generation || !root.active || !root.spriteItem) return
     root.actionGeneration = token
@@ -311,6 +527,26 @@ Item {
 
   function finishSequence(token) {
     if (token !== root.generation || token !== root.actionGeneration || !root.active) return
+    if (root.encounterRunning) {
+      var encounterAction = root.petState
+      root.spriteItem.playbackRequested = false
+      if (encounterAction === "cower" && root.encounterItem.stage === "cower") {
+        // The authored cower pose is finite in the Phase 6 packs; replay it
+        // as a bounded loop while the encounter owns the pet.
+        root.spriteItem.playbackRequested = true
+        root.spriteItem.restartSequence()
+      } else if (encounterAction === "brave") {
+        if (root.encounterItem && typeof root.encounterItem.petSequenceFinished === "function")
+          root.encounterItem.petSequenceFinished(encounterAction, token)
+      } else if (encounterAction === "victory") {
+        // Victory effects are started when the stage begins so the hard
+        // cleanup deadline never cuts them off before the sequence callback.
+      } else if (encounterAction === "failure") {
+        if (root.effectsItem) root.effectsItem.burst("failure")
+        if (root.soundItem) root.soundItem.play("failure")
+      }
+      return
+    }
     if (root.petState === "petting") {
       if (root.petPressActive) root.spriteItem.restartSequence()
       else root.endPetting(token)
@@ -430,6 +666,9 @@ Item {
 
   function startCelebration(reaction) {
     if (!root.active || !root.validReaction(reaction)) return
+    if (reaction === "success" && root.service
+        && typeof root.service.queueBondDelta === "function")
+      root.service.queueBondDelta(root.species, "celebration")
     root.generation++
     var token = root.generation
     root.stopAnimations()
@@ -454,6 +693,10 @@ Item {
     if (!service || !service.terminalFocused) return
     if (service.terminalVisible && !root.hostMatchesTerminal) return
     root.focusSeen = true
+    if (root.encounterRunning) {
+      root.focusQueued = true
+      return
+    }
     if (root.petState !== "idle") {
       root.focusQueued = true
       return
@@ -479,6 +722,18 @@ Item {
     var reaction = root.reactionForResult(String(service.commandLatestResult || ""))
     if (!root.validReaction(reaction)) return
     root.focusQueued = false
+    if (root.encounterRunning) {
+      if (reaction === "success" && root.encounterItem
+          && typeof root.encounterItem.successArrived === "function") {
+        // The encounter consumes the normal success animation, but it is
+        // still a celebrated precise success for the bond meter.
+        if (root.service && typeof root.service.queueBondDelta === "function")
+          root.service.queueBondDelta(root.species, "celebration")
+        root.encounterItem.successArrived()
+      } else if (reaction === "failure") root.queueOrdinaryFailure()
+      return
+    }
+    if (reaction === "failure" && root.requestEncounter(service.commandLatestStatus)) return
     root.showVoice(reaction === "success" ? "succeeded" : "failed")
     if (root.dragging) {
       root.pendingReaction = reaction
@@ -493,15 +748,20 @@ Item {
 
   function armDecisionTimer() {
     randomDecisionTimer.stop()
-    if (root.active && !root.reduceMotion && root.activity === "Always while visible"
+    var playful = root.activity === "Playful"
+    if (root.active && !root.reduceMotion
+        && (playful || root.activity === "Always while visible")
         && root.petState === "idle") {
-      randomDecisionTimer.interval = 3000 + Math.floor(root.nextRandom() * 6001)
+      randomDecisionTimer.interval = playful
+        ? 1200 + Math.floor(root.nextRandom() * 2401)
+        : 3000 + Math.floor(root.nextRandom() * 6001)
       randomDecisionTimer.restart()
     }
   }
 
   function decideIdleAction() {
     if (!root.active || root.reduceMotion || root.petState !== "idle") return
+    var playful = root.activity === "Playful"
     var behaviorRoll = root.nextRandom()
     if (behaviorRoll < 0.08) {
       // Idle voice is deliberately rare and carries no command/result facts.
@@ -509,7 +769,14 @@ Item {
       root.armDecisionTimer()
       return
     }
-    if (behaviorRoll < 0.22) {
+    // Keep the idle-voice slice independent from the rare Inseparable happy
+    // roll; reusing behaviorRoll made happy consume every roll below 0.08.
+    if (root.currentBond() >= 75 && root.nextRandom() < 0.10
+        && root.spriteItem.actions.happy) {
+      root.startUnpromptedHappy()
+      return
+    }
+    if (!playful && behaviorRoll < 0.22) {
       if (root.motionItem.edge !== "top") { root.startRouteStep(); return }
       root.petState = "sleep"
       root.spriteItem.actionName = "sleep"
@@ -520,6 +787,28 @@ Item {
       return
     }
     root.startRouteStep()
+  }
+
+  function startUnpromptedHappy() {
+    if (!root.active || root.reduceMotion || root.petState !== "idle"
+        || !root.spriteItem.actions.happy) return
+    root.generation++
+    var token = root.generation
+    root.stopAnimations()
+    root.petState = "happy"
+    root.actionGeneration = token
+    root.nextState = "idle"
+    root.spriteItem.actionName = "happy"
+    root.spriteItem.playbackRequested = true
+    root.spriteItem.restartSequence()
+    happyTimeout.interval = 900
+    happyTimeout.restart()
+  }
+
+  function finishUnpromptedHappy() {
+    if (root.petState !== "happy" || !root.active) return
+    root.spriteItem.playbackRequested = false
+    root.enterIdle()
   }
 
   function edgeStartU(edge) {
@@ -582,6 +871,7 @@ Item {
       renderScale: root.spriteItem.renderScale,
       durations: durations,
       random: { step: root.nextRandom(), turn: root.nextRandom() },
+      stepScale: root.activity === "Playful" ? 3 : 1,
       towardU: approachTarget,
       towardDirection: root.returningToRemembered ? root.returnDirection : undefined,
       towardEdge: root.returningToRemembered && root.rememberedPosition
@@ -767,6 +1057,8 @@ Item {
 
   function handleGeometryRemap(edgeName) {
     if (!root.active || !root.positionReadReady) return
+    root.interruptEncounter()
+    root.pendingEncounter = null
     root.dragging = false
     root.dragGeneration = -1
     root.motionItem.reactionX = 0
@@ -793,6 +1085,13 @@ Item {
   function handlePetPress(pointerX, pointerY) {
     if (!root.interactionEnabled || !root.active) return
     if (!root.pointerIsOnSprite(pointerX, pointerY)) return
+    if (root.encounterRunning) {
+      root.encounterPetPressActive = true
+      if (root.encounterItem && root.encounterItem.stage === "cower"
+          && typeof root.encounterItem.petPressed === "function")
+        root.encounterItem.petPressed()
+      return
+    }
     if (root.petState === "sleep") {
       sleepTimeout.stop()
       root.enterIdle()
@@ -843,21 +1142,31 @@ Item {
     }
     if (root.soundItem) root.soundItem.play("pet")
     root.showVoice("petting")
+    if (root.service && typeof root.service.queueBondDelta === "function")
+      root.service.queueBondDelta(root.species, "petting")
     root.savePosition()
     root.enterIdle()
   }
 
   function handlePetRelease() {
     if (root.dragging) { root.finishDrag(); return }
+    if (root.encounterPetPressActive) {
+      root.encounterPetPressActive = false
+      return
+    }
     if (!root.petPressActive || root.petPressGeneration !== root.generation) return
     root.endPetting(root.generation)
   }
 
   function beginDrag(pointerX, pointerY) {
-    if (!root.petDrag || !root.petPressActive || root.dragging || !root.pointerIsOnSprite(pointerX, pointerY)) return
+    var encounterPress = root.encounterPetPressActive && root.encounterRunning
+    if (!root.petDrag || (!root.petPressActive && !encounterPress) || root.dragging
+        || !root.pointerIsOnSprite(pointerX, pointerY)) return
+    if (encounterPress) root.interruptEncounter()
     root.generation++
     root.dragGeneration = root.generation
     root.petPressActive = false
+    root.encounterPetPressActive = false
     pettingTimeout.stop()
     root.dragging = true
     root.dragBaseContactX = root.motionItem.contactX
@@ -938,6 +1247,7 @@ Item {
       root.updateDragReaction(pointerX, pointerY)
       return
     }
+    if (root.encounterRunning) return
     var delta = pointerX - (root.motionItem ? root.motionItem.contactX : pointerX)
     var zone = Math.abs(delta) < 10 ? 1 : (delta < 0 ? 0 : 2)
     if (zone !== root.pointerZone) {
@@ -952,6 +1262,7 @@ Item {
 
   function noticeFromHover() {
     if (!root.interactionEnabled || !root.pointerInside || !root.active) return
+    if (root.encounterRunning) return
     if (Date.now() - root.lastNoticeAt < 2000) return
     if (["idle", "walk", "sleep"].indexOf(root.petState) < 0) return
     root.lastNoticeAt = Date.now()
@@ -1026,6 +1337,21 @@ Item {
       } else if (root.surfaceReady) root.reveal()
     }
     function onPetActivityChanged() { root.armDecisionTimer() }
+    function onPetVillainsChanged() {
+      if (root.petVillains) return
+      var interrupted = root.interruptEncounter()
+      root.pendingEncounter = null
+      encounterQueueTimer.stop()
+      if (interrupted) {
+        root.generation++
+        root.actionGeneration = root.generation
+        root.stopAnimations()
+        if (root.effectsItem) root.effectsItem.cancel()
+        root.petState = "idle"
+        root.nextState = "idle"
+        root.enterIdle()
+      }
+    }
     function onPetInteractionChanged() {
       if (root.service && root.service.terminalVisible && root.service.petEnabled
           && root.service.petInteraction && typeof root.service.refreshGrabMargin === "function")
@@ -1061,7 +1387,7 @@ Item {
     }
     function onReduceMotionChanged() {
       if (root.reduceMotion) {
-        if (root.dragging) root.invalidate()
+        if (root.dragging || root.encounterRunning) root.invalidate()
         else {
           root.stopAnimations()
           root.effectsItem.cancel()
@@ -1150,6 +1476,20 @@ Item {
     interval: 600
     repeat: false
     onTriggered: root.followPointerOnce()
+  }
+
+  Timer {
+    id: encounterQueueTimer
+    interval: 250
+    repeat: true
+    onTriggered: root.tryStartQueuedEncounter()
+  }
+
+  Timer {
+    id: happyTimeout
+    interval: 900
+    repeat: false
+    onTriggered: root.finishUnpromptedHappy()
   }
 
   SequentialAnimation {
@@ -1255,7 +1595,8 @@ Item {
       var pointerX = petMouseArea.x + mouse.x
       var pointerY = petMouseArea.y + mouse.y
       root.updatePointer(pointerX, pointerY)
-      if (petMouseArea.pressed && !root.dragging && root.petPressActive
+      if (petMouseArea.pressed && !root.dragging
+          && (root.petPressActive || root.encounterPetPressActive)
           && Math.sqrt(Math.pow(pointerX - root.dragPressX, 2)
             + Math.pow(pointerY - root.dragPressY, 2)) > 8)
         root.beginDrag(pointerX, pointerY)
@@ -1296,28 +1637,31 @@ Item {
     onActiveChanged: if (!active) root.soundItem = null
   }
 
-  FileView {
-    id: voiceFile
-    path: root.petVoice === "Off" ? "" : Qt.resolvedUrl("assets/voice/lines.json").toString().replace(/^file:\/\//, "")
-    watchChanges: false
-    printErrors: false
-    onTextChanged: {
-      try {
-        var parsed = JSON.parse(text() || "")
-        var report = PetVoice.validateDocument(parsed)
-        root.voiceReady = report.valid
-        root.voiceLines = report.valid ? parsed : null
-      } catch (e) {
-        root.voiceReady = false
-        root.voiceLines = null
+  Loader {
+    id: voiceLoader
+    active: root.petVoice !== "Off"
+    sourceComponent: Component {
+      FileView {
+        path: Qt.resolvedUrl("assets/voice/lines.json").toString().replace(/^file:\/\//, "")
+        watchChanges: false
+        printErrors: false
+        onLoaded: root.loadVoiceDocument(text())
+        onLoadFailed: {
+          root.voiceReady = false
+          root.voiceLines = null
+        }
       }
     }
   }
 
   onPetVoiceChanged: {
-    root.voiceReady = false
-    root.voiceLines = null
-    if (root.petVoice !== "Off") voiceFile.reload()
-    else if (root.effectsItem) root.effectsItem.dismissBubble()
+    // The document is shared by every enabled tier. Keep it loaded when the
+    // user switches Kind/Sassy/Savage; the Loader stays active and only the
+    // selector tier changes. Turning voice Off tears the document down.
+    if (root.petVoice === "Off") {
+      root.voiceReady = false
+      root.voiceLines = null
+      if (root.effectsItem) root.effectsItem.dismissBubble()
+    }
   }
 }

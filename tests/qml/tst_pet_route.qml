@@ -62,6 +62,24 @@ TestCase {
     verify(Math.abs(plan.durationMs - expected) <= 1)
   }
 
+  function test_playful_step_scale_makes_longer_floor_routes() {
+    var calm = PetRoute.planStep({
+      edge: "top", u: 0.1, direction: 1, roamingMode: "Top edge",
+      terminalRect: rect, stride: 10, renderScale: 1,
+      durations: [110, 110, 110, 110],
+      random: { step: 0.1, turn: 0.99 }
+    })
+    var playful = PetRoute.planStep({
+      edge: "top", u: 0.1, direction: 1, roamingMode: "Top edge",
+      terminalRect: rect, stride: 10, renderScale: 1, stepScale: 3,
+      durations: [110, 110, 110, 110],
+      random: { step: 0.1, turn: 0.99 }
+    })
+    compare(playful.distancePx, calm.distancePx * 3)
+    compare(playful.durationMs, calm.durationMs * 3)
+    compare(playful.stepScale, 3)
+  }
+
   function test_whole_border_corner_keeps_direction() {
     var edgeEnd = PetRoute.edgeEndU("top", rect)
     var plan = PetRoute.planStep({

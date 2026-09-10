@@ -12,18 +12,27 @@ completion indicators.
 https://github.com/user-attachments/assets/e3437c1d-00c5-451e-b6e4-2c86dd82100a
 
 
-## What's new in 2.2
+## What's new in 2.3
 
-Phase 6 turns the pet into an optional, bounded interactive world:
+Phase 7 adds villains and friendship to the optional, bounded pet world:
 
-- Whole-border roaming uses validated wall and ledge posture families, with
-  room-aware edge selection and continuous corner anchor compensation.
-- Drag the pet to another allowed edge, enable an optional pointer-awareness
-  halo, and remember its position across shell reloads.
-- Optional authored speech bubbles support `Kind`, `Sassy`, and `Savage` tones;
-  optional short sound cues use `pw-play` or `paplay` and remain off by default.
-- All new settings are defensive, theme-aware, reduced-motion compatible, and
-  covered by the pack/voice validators and deterministic route tests.
+- A precise tracked command failure can bring a bounded bug or ghost encounter;
+  the villain joins the existing pet input region and never covers the terminal
+  or its resize grab ring.
+- Encounters are capped at 14 seconds, pause completely with `Reduce motion`,
+  and cleanly interrupt on hide, resize, species changes, or dragging.
+- Per-species bond tiers persist in the plugin state directory, with capped
+  petting/celebration gains, bounded decay, bravery odds, visible progress
+  tracks, and a confirmed `Reset bond` action.
+- Friendship unlocks additional authored voice lines and rare unprompted
+  happiness; no voice line from 2.2 is removed or tone-gated.
+- `Playful` activity is available for pets that should move more often: it
+  suppresses idle sleep, uses longer route steps, and checks for a new action
+  about every 1.2–3.6 seconds while visible.
+
+Phase 6 remains the foundation for the whole-border pet, drag/hover controls,
+authored `Kind`, `Sassy`, and `Savage` lines, optional `pw-play`/`paplay` cues,
+and remembered position.
 
 ## What's new in 2.0
 
@@ -73,7 +82,7 @@ to verify PNG contents and manifest dimensions.
 New work follows the reusable
 [General Omarchy plugin design rules](../plugin-docs/rules/omarchy-plugin-design.md)
 through this repository's [design-rule profile](docs/design-rules.md) and
-[phase plan](docs/plan/README.md).
+[phase plan](../docs-vault/yadtm-Plugin/plan/README.md).
 
 The profile makes truthful state, explicit/reversible external config edits,
 native Omarchy UI tokens, theme ownership, bounded motion, reduced motion, and
@@ -147,8 +156,9 @@ The panel is organized into two tabs to keep related controls together:
 Long effect lists stay inside the panel's scrollable content area, so the
 settings card remains usable at smaller heights.
 
-The Animation & pets tab also exposes tap-and-hold petting, top-edge or
-whole-border roaming, pet activity, and reduced-motion controls.
+The Animation & pets tab also exposes tap-and-hold petting, villains, bond
+tiers, top-edge or whole-border roaming, pet activity, and reduced-motion
+controls.
 
 The bar widget settings include `Show icon`. Turn it off to hide the icon while
 keeping the global shortcut and terminal service active.
@@ -180,10 +190,21 @@ supplies wall-safe climb and descending art. **Drag to move** picks the pet up
 with a carried pose and snaps release to the nearest allowed edge. **Pointer
 awareness** is Off by default; an enabled halo intentionally consumes clicks in
 its pixels, so the panel explains that trade-off. On focus permits focus
-reactions, Always visible also permits infrequent walking and sleep, and
-Celebrations limits it to qualifying precise command results from the explicit
-shell integration.
+reactions, Always visible also permits infrequent walking and sleep, Playful
+uses more frequent, longer walks without idle sleep, and Celebrations limits it
+to qualifying precise command results from the explicit shell integration. Set
+**Whole border** under **Roaming** if the pet should climb or slide down the
+terminal sides and travel along the bottom edge; **Top edge** keeps it on the
+top border.
 Generic urgency never produces a success or failure pet reaction.
+
+**Villains** are Off only when explicitly disabled and otherwise require the
+pet, command tracking, and the terminal being visible when a qualifying
+failure occurs. Exit statuses 1–127 bring a bug; signal-class failures bring a
+ghost. A quick `command not found` is normally below the 5-second default
+threshold, so set **Notify after (ms)** to `0` if short failures should spawn a
+bug too. Encounters stay on the top edge, are at most one at a time, and never
+turn hidden failures into a new arrival.
 
 **Voice** is Off by default and shows only authored lines based on petting or
 precise qualifying results. Lines never contain command text and never repeat
@@ -191,6 +212,13 @@ within a five-line window. **Sound** is also Off by default and is loaded only
 when selected; missing players are reported as unavailable. **Remember position**
 stores a short-lived, versioned state document under the runtime directory and
 restores it only for the current terminal owner and species.
+
+**Bond** is a private per-species 0–100 score under the state directory. It
+shows the tier word, number, and track in the panel; a missing file starts at
+`Wary`, while an unreadable or future-version file stays `Unavailable` and is
+never overwritten. Bond changes bravery, unlock extra voice lines by
+`peakTier`, and make the `Inseparable` pet occasionally happy while always
+visible.
 
 **Reduce motion** holds the pet on a static pose, suppresses entrance particles,
 and changes the Phase 2 bar indicator to a colored dot. It is plugin-local

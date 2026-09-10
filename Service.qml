@@ -2,12 +2,14 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
+import "PetBond.js" as PetBond
 
 Item {
   id: root
   visible: false
 
   property var settings: ({})
+  property var hostScreen: null
   // The shell instantiates this Service once per bar, i.e. per monitor, and
   // each instance receives its own copy of `settings`. A change saved through
   // one panel does not reach the sibling instances, so hotkey-spawned helpers
@@ -54,6 +56,34 @@ Item {
   property string commandFlashResult: ""
   property string commandDismissedFinishKey: ""
   property string clearedTrackedAddress: ""
+  // Bond state is intentionally separate from the runtime journal. It is a
+  // durable, user-readable score and is written only by the service whose
+  // terminal currently has an owning monitor.
+  property int bondRevision: 0
+  property bool bondReadReady: false
+  property bool bondUnavailable: false
+  property bool bondMissing: true
+  property var bondDocument: null
+  property var bondDeltas: []
+  property var bondAppliedDeltas: []
+  property string bondWriter: ""
+  property int bondNextRevision: 0
+  property bool bondWriteInFlight: false
+  property bool bondFlushRetry: false
+  property bool bondDirectoryReady: false
+  property bool bondFlushWaitingForReload: false
+  property string bondFlushOwner: ""
+  property string bondExpectedText: ""
+  readonly property string bondStateRoot: (Quickshell.env("XDG_STATE_HOME")
+    || ((Quickshell.env("HOME") || "") + "/.local/state"))
+    + "/io.github.tuthan.dropdown-terminal"
+  readonly property string bondPath: root.bondStateRoot + "/bond.json"
+  readonly property string bondOwnerName: root.terminalMonitor
+    ? String(root.terminalMonitor.name || "") : ""
+  readonly property bool bondOwner: !!root.hostScreen && root.bondOwnerName !== ""
+    && String(root.hostScreen.name || "") === root.bondOwnerName
+  readonly property string bondDiagnostic: root.bondUnavailable
+    ? "Bond: Unavailable (" + root.bondPath + ")" : ""
   readonly property bool debugEnabled: Quickshell.env("YADTM_DEBUG") === "1"
 
   FileView {
@@ -149,6 +179,106 @@ Item {
     }
   }
 
+  // Bond is a durable document rather than a runtime cache. FileView changes
+  // are the only external refresh trigger; all arithmetic is replayed through
+  // PetBond so a sibling service never writes a stale snapshot.
+  FileView {
+    id: bondFile
+    path: root.bondPath
+    atomicWrites: true
+    watchChanges: true
+    printErrors: false
+    onFileChanged: {
+      if (root.bondWriteInFlight || root.bondFlushWaitingForReload)
+        root.bondFlushRetry = true
+      reload()
+    }
+    onLoaded: if (!root.bondWriteInFlight) root.consumeBondText(text())
+    onTextChanged: {
+      // setText() updates FileView.text before the asynchronous save signal.
+      // Do not treat our own pending snapshot as a fresh disk read: the
+      // queued deltas are already represented in that snapshot and replaying
+      // them here would double-apply the bond change.
+      if (root.bondWriteInFlight) return
+      root.consumeBondText(text())
+    }
+    onLoadFailed: bondProbeProcess.running = true
+    onSaved: root.finishBondSave()
+    onSaveFailed: root.finishBondSaveFailed()
+  }
+
+  Process {
+    id: bondProbeProcess
+    command: ["bash", "-c", "if [ ! -e \"$1\" ]; then printf missing; elif [ ! -r \"$1\" ]; then printf unreadable; else printf present; fi", "bash", root.bondPath]
+    running: false
+    stdout: StdioCollector { id: bondProbeOutput; waitForEnd: true }
+    onExited: {
+      var state = String(bondProbeOutput.text || "").trim()
+      if (state === "missing") {
+        bondReadTimer.stop()
+        root.bondReadReady = true
+        root.bondMissing = true
+        root.bondUnavailable = false
+        root.bondDocument = PetBond.emptyDocument(root.localDay(), root.bondOwnerName)
+        root.bondRevision++
+      } else if (state === "unreadable") {
+        root.markBondUnavailable("bond document could not be read")
+      }
+    }
+  }
+
+  Timer {
+    id: bondReadTimer
+    interval: 1000
+    repeat: false
+    onTriggered: {
+      if (root.bondReadReady) return
+      // FileView does not expose a useful synchronous missing-file result. An
+      // empty first read is the documented missing-file path: all species are
+      // Wary and the writer will create the directory only on first mutation.
+      root.bondReadReady = true
+      root.bondMissing = true
+      root.bondUnavailable = false
+      root.bondDocument = PetBond.emptyDocument(root.localDay(), root.bondOwnerName)
+      root.bondRevision++
+      root.logDebug("bond document missing; using Wary defaults")
+    }
+  }
+
+  Timer {
+    id: bondFlushTimer
+    interval: 2000
+    repeat: false
+    onTriggered: root.flushBondState()
+  }
+
+  Timer {
+    id: bondReloadTimer
+    interval: 120
+    repeat: false
+    onTriggered: root.finishBondReload()
+  }
+
+  Timer {
+    id: bondMidnightTimer
+    interval: 3600000
+    repeat: false
+    onTriggered: {
+      root.chargeBondDecay()
+      root.scheduleBondMidnight()
+    }
+  }
+
+  Process {
+    id: bondDirectoryProcess
+    command: ["bash", "-c", "mkdir -p -- \"$1\" && chmod 700 -- \"$1\"", "bash", root.bondStateRoot]
+    running: false
+    onExited: {
+      root.bondDirectoryReady = true
+      root.flushBondState(root.bondFlushOwner || undefined)
+    }
+  }
+
   // The command journal is append-only and shared by every per-screen service
   // instance. FileView reloads asynchronously; parsing is therefore driven by
   // textChanged, never directly from onFileChanged.
@@ -223,6 +353,262 @@ Item {
 
   function logDebug(message) {
     if (root.debugEnabled) console.log("Dropdown Terminal [debug]: " + message)
+  }
+
+  function localDay() {
+    var now = new Date()
+    return Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 86400000)
+  }
+
+  function scheduleBondMidnight() {
+    var now = new Date()
+    var next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 25)
+    bondMidnightTimer.interval = Math.max(1000, Math.min(86400000, next.getTime() - now.getTime()))
+    bondMidnightTimer.restart()
+  }
+
+  function bondSpeciesNames() {
+    return PetBond.SPECIES.slice()
+  }
+
+  function bondRecord(species) {
+    var name = String(species || "Penguin")
+    var today = root.localDay()
+    if (root.bondUnavailable || !root.bondDocument)
+      return PetBond.emptySpecies(today)
+    var record = root.bondDocument.species && root.bondDocument.species[name]
+    return PetBond.normalizeSpecies(record, today)
+  }
+
+  function bondValue(species) {
+    return root.bondRecord(species).bond
+  }
+
+  function bondPeakTier(species) {
+    return root.bondRecord(species).peakTier
+  }
+
+  function validBondDocument(document) {
+    return PetBond.validDocument(document)
+  }
+
+  function requestBondRead() {
+    bondReadTimer.stop()
+    root.bondReadReady = false
+    root.bondUnavailable = false
+    root.bondMissing = true
+    root.bondDocument = null
+    root.bondDirectoryReady = false
+    bondReadTimer.restart()
+    bondFile.reload()
+  }
+
+  function markBondUnavailable(reason) {
+    bondReadTimer.stop()
+    root.bondReadReady = true
+    root.bondMissing = false
+    root.bondUnavailable = true
+    root.bondDocument = null
+    root.bondDeltas = []
+    root.bondAppliedDeltas = []
+    root.bondFlushWaitingForReload = false
+    root.bondWriteInFlight = false
+    root.bondFlushRetry = false
+    root.bondExpectedText = ""
+    root.bondFlushOwner = ""
+    root.logDebug(reason || "bond document unavailable")
+    root.bondRevision++
+  }
+
+  function consumeBondText(raw) {
+    var text = String(raw || "")
+    if (text.trim() === "") {
+      if (!root.bondReadReady || root.bondMissing) {
+        bondReadTimer.stop()
+        root.bondReadReady = true
+        root.bondMissing = true
+        root.bondUnavailable = false
+        root.bondDocument = PetBond.emptyDocument(root.localDay(), root.bondOwnerName)
+        root.bondRevision++
+      }
+      return
+    }
+    var parsed
+    try {
+      parsed = JSON.parse(text)
+    } catch (e) {
+      root.markBondUnavailable("bond document ignored: invalid JSON")
+      return
+    }
+    if (!root.validBondDocument(parsed)) {
+      root.markBondUnavailable("bond document ignored: unsupported or invalid version")
+      return
+    }
+    bondReadTimer.stop()
+    root.bondReadReady = true
+    root.bondMissing = false
+    root.bondUnavailable = false
+    var decayed = PetBond.applyDocumentDecay(parsed, root.localDay())
+    root.bondDocument = decayed.document
+    root.bondNextRevision = Math.max(root.bondNextRevision,
+      Number(decayed.document.revision) || 0)
+    if (decayed.changed && root.bondOwner) {
+      var decayDeltas = root.bondDeltas.slice()
+      var today = root.localDay()
+      for (var i = 0; i < 3; i++)
+        decayDeltas.push({ species: root.bondSpeciesNames()[i], kind: "decay", today: today })
+      root.bondDeltas = decayDeltas
+      bondFlushTimer.restart()
+    }
+    // Preserve a locally queued delta on top of a fresh reader snapshot so a
+    // monitor transfer or an external FileView notification cannot make the
+    // panel jump backwards before the read-modify-write completes.
+    if (root.bondDeltas.length > 0)
+      root.bondDocument = PetBond.applyDeltas(root.bondDocument, root.bondDeltas, root.localDay())
+    root.bondRevision++
+  }
+
+  function queueBondDelta(species, kind) {
+    if (!root.bondReadReady || root.bondUnavailable || !root.bondOwner) return false
+    var name = String(species || root.petSpecies)
+    if (root.bondSpeciesNames().indexOf(name) < 0) return false
+    if (!root.bondDocument)
+      root.bondDocument = PetBond.emptyDocument(root.localDay(), root.bondOwnerName)
+    var delta = { species: name, kind: String(kind || "") }
+    var queued = root.bondDeltas.slice()
+    // A reset is a user-confirmed boundary. Do not let mutations queued before
+    // that boundary reappear when the delta log is merged into fresh disk data;
+    // later mutations in the same coalescing window still apply after reset.
+    if (String(delta.kind).toLowerCase() === "reset") {
+      queued = queued.filter(function(previous) {
+        return String(previous && previous.species || "") !== name
+      })
+    }
+    root.bondDeltas = queued.concat([delta])
+    root.bondDocument.species[name] = PetBond.applyDelta(root.bondDocument.species[name],
+      delta.kind, root.localDay())
+    root.bondRevision++
+    bondFlushTimer.restart()
+    return true
+  }
+
+  function resetBond(species) {
+    return root.queueBondDelta(String(species || root.petSpecies), "reset")
+  }
+
+  function ensureBondDirectory() {
+    if (root.bondDirectoryReady) return true
+    if (!bondDirectoryProcess.running) bondDirectoryProcess.running = true
+    return false
+  }
+
+  function flushBondState(ownerOverride) {
+    if (!root.bondReadReady || root.bondUnavailable || root.bondDeltas.length === 0) return
+    var currentOwner = root.bondOwnerName
+    var hasOwnerOverride = ownerOverride !== undefined && ownerOverride !== null
+      && String(ownerOverride) !== ""
+    var writer = String(ownerOverride || currentOwner || "")
+    if (!writer || (!hasOwnerOverride && !root.bondOwner)
+        || (!hasOwnerOverride && writer !== currentOwner)
+        || (root.bondWriter && root.bondWriter !== writer)) return
+    if (root.bondWriteInFlight || root.bondFlushWaitingForReload) {
+      root.bondFlushRetry = true
+      return
+    }
+    root.bondFlushOwner = writer
+    if (!root.ensureBondDirectory()) return
+    root.bondWriter = writer
+    root.bondAppliedDeltas = root.bondDeltas.slice()
+    root.bondFlushWaitingForReload = true
+    bondFile.reload()
+    bondReloadTimer.restart()
+  }
+
+  function dropAppliedBondDeltas() {
+    var pending = root.bondDeltas.slice()
+    for (var i = 0; i < root.bondAppliedDeltas.length; i++) {
+      var index = pending.indexOf(root.bondAppliedDeltas[i])
+      if (index >= 0) pending.splice(index, 1)
+    }
+    root.bondDeltas = pending
+  }
+
+  function finishBondReload() {
+    if (!root.bondFlushWaitingForReload || root.bondAppliedDeltas.length === 0) return
+    root.bondFlushWaitingForReload = false
+    if (root.bondFlushRetry) {
+      // A sibling changed the file while this cycle was still reading it.
+      // Keep the complete delta prefix queued and read the new base before
+      // attempting a write; this is the bounded retry from the ownership
+      // protocol, not a second writer.
+      root.bondFlushRetry = false
+      root.bondFlushWaitingForReload = true
+      bondFile.reload()
+      bondReloadTimer.restart()
+      return
+    }
+    var text = String(bondFile.text() || "")
+    var fresh
+    if (text.trim() === "") {
+      fresh = PetBond.emptyDocument(root.localDay(), root.bondWriter)
+    } else {
+      try { fresh = JSON.parse(text) } catch (e) {
+        root.markBondUnavailable("bond save skipped: fresh document is invalid")
+        return
+      }
+      if (!root.validBondDocument(fresh)) {
+        root.markBondUnavailable("bond save skipped: fresh document is unsupported")
+        return
+      }
+    }
+    var updated = PetBond.applyDeltas(fresh, root.bondAppliedDeltas, root.localDay(), root.bondWriter)
+    updated.revision = Math.max(Number(updated.revision) || 0, root.bondNextRevision) + 1
+    updated.writer = root.bondWriter
+    updated.updatedAt = Math.floor(Date.now() / 1000)
+    root.bondNextRevision = updated.revision
+    root.bondDocument = updated
+    root.bondExpectedText = JSON.stringify(updated) + "\n"
+    root.bondWriteInFlight = true
+    bondFile.setText(root.bondExpectedText)
+  }
+
+  function finishBondSave() {
+    if (!root.bondWriteInFlight) return
+    var ownWrite = String(bondFile.text() || "").trim() === root.bondExpectedText.trim()
+    if (!root.bondFlushRetry || ownWrite) root.dropAppliedBondDeltas()
+    root.bondAppliedDeltas = []
+    root.bondWriteInFlight = false
+    root.bondFlushRetry = false
+    root.bondExpectedText = ""
+    root.bondFlushOwner = ""
+    root.bondRevision++
+    if (root.bondDeltas.length > 0) bondFlushTimer.restart()
+  }
+
+  function finishBondSaveFailed() {
+    if (!root.bondWriteInFlight) return
+    root.bondWriteInFlight = false
+    root.bondAppliedDeltas = []
+    root.bondFlushRetry = false
+    root.bondExpectedText = ""
+    root.bondFlushOwner = ""
+    root.logDebug("bond save failed; deltas retained")
+    if (root.bondDeltas.length > 0) bondFlushTimer.restart()
+  }
+
+  function chargeBondDecay() {
+    if (!root.bondReadReady || root.bondUnavailable || !root.bondDocument) return
+    var before = JSON.stringify(root.bondDocument)
+    var decayed = PetBond.applyDocumentDecay(root.bondDocument, root.localDay())
+    root.bondDocument = decayed.document
+    if (before !== JSON.stringify(root.bondDocument) && root.bondOwner) {
+      var deltas = root.bondDeltas.slice()
+      var names = root.bondSpeciesNames()
+      for (var i = 0; i < names.length; i++) deltas.push({ species: names[i], kind: "decay" })
+      root.bondDeltas = deltas
+      bondFlushTimer.restart()
+      root.bondRevision++
+    }
   }
 
   function requestPetStateRead() {
@@ -394,10 +780,11 @@ Item {
     var value = String(setting("petSpecies", "Penguin"))
     return ["Penguin", "Cat", "Corgi"].indexOf(value) >= 0 ? value : "Penguin"
   }
+  readonly property bool petVillains: { configRevision; return setting("petVillains", true) !== false }
   readonly property string petActivity: {
     configRevision
     var value = String(setting("petActivity", "On focus"))
-    return ["On focus", "Always while visible", "Celebrations only"].indexOf(value) >= 0
+    return ["On focus", "Always while visible", "Playful", "Celebrations only"].indexOf(value) >= 0
       ? value : "On focus"
   }
   readonly property bool reduceMotion: { configRevision; return setting("reduceMotion", false) === true }
@@ -1049,6 +1436,11 @@ Item {
       if (root.petEnabled && root.petInteraction) root.refreshGrabMargin()
       terminalStateRefreshTimer.restart()
       root.clearCommandUnread()
+      if (!root.bondReadReady) root.requestBondRead()
+    } else {
+      // Hiding is a settle boundary for durable bond deltas too. The owning
+      // service flushes; sibling services remain readers.
+      root.flushBondState()
     }
   }
   onPetEnabledChanged: {
@@ -1068,14 +1460,22 @@ Item {
       root.petStateWriter = ""
     }
   }
-  onRuntimeStateRootChanged: root.requestPetStateRead()
+  onRuntimeStateRootChanged: {
+    root.requestPetStateRead()
+    root.requestBondRead()
+  }
   onTerminalMonitorChanged: {
     var newOwner = root.terminalMonitor ? String(root.terminalMonitor.name || "") : ""
     if (root.petStateWriter && root.petStateWriter !== newOwner)
       root.flushPetState(root.petStateWriter)
+    if (root.bondWriter && root.bondWriter !== newOwner) {
+      root.flushBondState(root.bondWriter)
+      root.bondWriter = ""
+    }
     // A new owner must reload before its first coalesced write. This also
     // prevents a stale sibling snapshot from being used after a transfer.
     root.requestPetStateRead()
+    root.requestBondRead()
   }
   onTerminalFocusedChanged: if (root.terminalFocused) root.clearCommandUnread()
 
@@ -1093,6 +1493,8 @@ Item {
     refreshMutationStatus()
     refreshShellIntegrationStatus()
     if (commandTracking) reloadCommandEvents()
+    root.requestBondRead()
+    root.scheduleBondMidnight()
     root.logDebug("service ready address=" + root.trackedAddress)
   }
 
