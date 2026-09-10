@@ -31,6 +31,14 @@ Item {
   property int eventProcessedOffset: 0
   property string eventIncompleteTail: ""
   property bool eventReplayReady: false
+  // Cached once for each terminal reveal. The pet layer uses this margin to
+  // leave Hyprland's active resize-sensitive grab ring to the terminal
+  // surface. When resize_on_border is disabled, only the real border is
+  // reserved; an inactive resize ring must not consume the pet's body.
+  property real grabMargin: 17
+  property bool grabMarginReady: false
+  readonly property real fallbackGrabMargin: 64
+  readonly property real maxGrabMarginComponent: 4096
   property int eventRecordCount: 0
   property var commandSessions: Object.create(null)
   property string eventTerminalState: "closed"
@@ -41,6 +49,7 @@ Item {
   property string commandLatestResult: ""
   property bool commandLatestQualifies: false
   property int commandLatestDurationMs: 0
+  property int commandLatestStatus: 0
   property int commandFlashUntil: 0
   property string commandFlashResult: ""
   property string commandDismissedFinishKey: ""
@@ -82,6 +91,61 @@ Item {
       root.stateRevision++
       root.clearedTrackedAddress = ""
       root.logDebug("runtime state reloaded")
+    }
+  }
+
+  // Pet position is a separate, short-lived document. Only the Service whose
+  // screen hosts the terminal may call savePetState; sibling services are
+  // readers and never perform a read-modify-write of this file.
+  property int petStateRevision: 0
+  property bool petStateReadReady: false
+  property var petStateDocument: null
+  property var pendingPetState: null
+  property string petStateWriter: ""
+  property int petStateNextRevision: 0
+  FileView {
+    id: petStateFile
+    path: root.runtimeStateRoot ? root.runtimeStateRoot + "/io.github.tuthan.dropdown-terminal.pet-state.json" : ""
+    atomicWrites: true
+    watchChanges: false
+    printErrors: false
+    onTextChanged: {
+      petStateReadTimer.stop()
+      root.petStateRevision++
+      root.petStateReadReady = true
+      try {
+        var parsed = JSON.parse(text() || "")
+        root.petStateDocument = parsed && typeof parsed === "object" ? parsed : null
+        if (parsed && isFinite(Number(parsed.revision)))
+          root.petStateNextRevision = Math.max(root.petStateNextRevision, Number(parsed.revision))
+      } catch (e) {
+        root.petStateDocument = null
+        root.logDebug("pet position document ignored: invalid JSON")
+      }
+    }
+    onSaveFailed: root.logDebug("pet position save failed")
+  }
+
+  Timer {
+    id: petStateWriteTimer
+    interval: 2000
+    repeat: false
+    onTriggered: root.flushPetState()
+  }
+
+  // FileView has no synchronous "missing file" result. Give a reload one
+  // bounded second to publish its contents, then allow the pet to use the
+  // Phase 5 default position rather than waiting forever on a first run.
+  Timer {
+    id: petStateReadTimer
+    interval: 1000
+    repeat: false
+    onTriggered: {
+      if (!root.petStateReadReady) {
+        root.petStateReadReady = true
+        root.petStateRevision++
+        root.logDebug("pet position read timed out; using default")
+      }
     }
   }
 
@@ -161,6 +225,114 @@ Item {
     if (root.debugEnabled) console.log("Dropdown Terminal [debug]: " + message)
   }
 
+  function requestPetStateRead() {
+    if (!root.petRememberPosition || !root.runtimeStateRoot) return
+    root.petStateReadReady = false
+    root.petStateDocument = null
+    petStateReadTimer.restart()
+    petStateFile.reload()
+  }
+
+  function allowedPetEdge(value, allowedEdges) {
+    return Array.isArray(allowedEdges) && allowedEdges.indexOf(String(value)) >= 0
+  }
+
+  function readPetState(species, allowedEdges) {
+    if (!root.petRememberPosition || !root.petStateReadReady) return null
+    var document = root.petStateDocument
+    var now = Math.floor(Date.now() / 1000)
+    if (!document || Number(document.version) !== 1
+        || String(document.species || "") !== String(species || "")
+        || !allowedPetEdge(document.edge, allowedEdges)
+        || !isFinite(Number(document.fraction)) || Number(document.fraction) < 0
+        || Number(document.fraction) > 1 || !isFinite(Number(document.savedAt))
+        || now - Number(document.savedAt) > 12 * 60 * 60 || now < Number(document.savedAt) - 60) {
+      if (document) root.logDebug("pet position document ignored")
+      return null
+    }
+    return {
+      edge: String(document.edge),
+      fraction: Number(document.fraction),
+      direction: Number(document.direction) < 0 ? -1 : 1,
+      revision: Number(document.revision) || 0
+    }
+  }
+
+  function savePetState(snapshot, ownerName, immediate) {
+    if (!root.petRememberPosition || !root.petStateReadReady || !snapshot || !root.runtimeStateRoot) return
+    var currentOwner = root.terminalMonitor ? String(root.terminalMonitor.name || "") : ""
+    if (!currentOwner || String(ownerName || "") !== currentOwner) return
+    root.pendingPetState = {
+      edge: String(snapshot.edge || "top"),
+      fraction: Math.max(0, Math.min(1, Number(snapshot.fraction) || 0)),
+      direction: Number(snapshot.direction) < 0 ? -1 : 1,
+      species: String(snapshot.species || root.petSpecies),
+      writer: currentOwner
+    }
+    root.petStateWriter = currentOwner
+    if (immediate === true) root.flushPetState()
+    else petStateWriteTimer.restart()
+  }
+
+  function flushPetState(ownerOverride) {
+    if (!root.pendingPetState || !root.petRememberPosition || !root.runtimeStateRoot) return
+    var currentOwner = root.terminalMonitor ? String(root.terminalMonitor.name || "") : ""
+    var writer = String(ownerOverride || currentOwner || "")
+    if (!writer || root.petStateWriter !== writer || root.pendingPetState.writer !== writer) return
+    var pending = root.pendingPetState
+    root.pendingPetState = null
+    var diskRevision = 0
+    try {
+      var current = JSON.parse(petStateFile.text() || "")
+      diskRevision = isFinite(Number(current.revision)) ? Number(current.revision) : 0
+    } catch (e) {}
+    var revision = Math.max(root.petStateNextRevision, diskRevision) + 1
+    root.petStateNextRevision = revision
+    var document = {
+      version: 1, revision: revision, writer: pending.writer, species: pending.species,
+      edge: pending.edge, fraction: pending.fraction, direction: pending.direction,
+      savedAt: Math.floor(Date.now() / 1000)
+    }
+    petStateFile.setText(JSON.stringify(document) + "\n")
+  }
+
+  function parseGrabOptions(raw) {
+    var lines = String(raw || "").split(/\r?\n/)
+    var values = []
+    var resizeOnBorder
+    for (var i = 0; i < lines.length; i++) {
+      if (!lines[i].trim()) continue
+      try {
+        var parsed = JSON.parse(lines[i])
+        if (parsed.bool !== undefined) {
+          resizeOnBorder = parsed.bool === true
+          continue
+        }
+        var value = Number(parsed.int !== undefined ? parsed.int : parsed.value)
+        if (isFinite(value) && value >= 0)
+          values.push(Math.max(0, Math.min(root.maxGrabMarginComponent, value)))
+      } catch (e) {}
+    }
+    if (values.length !== 2 || resizeOnBorder === undefined) return null
+    return {
+      borderSize: values[0],
+      extendBorderGrabArea: values[1],
+      resizeOnBorder: resizeOnBorder,
+      margin: resizeOnBorder ? Math.max(0, values[0] + values[1]) : values[0]
+    }
+  }
+
+  function refreshGrabMargin(force) {
+    if (!root.petEnabled || !root.petInteraction) {
+      root.grabMarginReady = false
+      return
+    }
+    if (!force && root.grabMarginReady) return
+    if (grabMarginProcess.running) return
+    root.grabMarginReady = false
+    grabMarginProcess.running = true
+  }
+
   function persistedSetting(name) {
     try {
       var txt = shellConfigFile.text()
@@ -229,6 +401,32 @@ Item {
       ? value : "On focus"
   }
   readonly property bool reduceMotion: { configRevision; return setting("reduceMotion", false) === true }
+  readonly property bool petInteraction: { configRevision; return setting("petInteraction", true) !== false }
+  readonly property string petRoaming: {
+    configRevision
+    var value = String(setting("petRoaming", "Top edge"))
+    return ["Top edge", "Whole border"].indexOf(value) >= 0 ? value : "Top edge"
+  }
+  readonly property bool petDrag: { configRevision; return setting("petDrag", true) !== false }
+  readonly property string petHoverHalo: {
+    configRevision
+    var value = String(setting("petHoverHalo", "Off"))
+    return ["Off", "Small", "Large"].indexOf(value) >= 0 ? value : "Off"
+  }
+  readonly property string petVoice: {
+    configRevision
+    var value = String(setting("petVoice", "Off"))
+    return ["Off", "Kind", "Sassy", "Savage"].indexOf(value) >= 0 ? value : "Off"
+  }
+  readonly property string petSound: {
+    configRevision
+    var value = String(setting("petSound", "Off"))
+    return ["Off", "Quiet", "Normal"].indexOf(value) >= 0 ? value : "Off"
+  }
+  readonly property bool petRememberPosition: {
+    configRevision
+    return setting("petRememberPosition", true) !== false
+  }
   readonly property bool urgencyIndicator: { configRevision; return setting("urgencyIndicator", true) !== false }
   readonly property bool commandTracking: { configRevision; return setting("commandTracking", false) === true }
   readonly property int commandNotifyAfterMs: {
@@ -254,6 +452,7 @@ Item {
     root.commandLatestResult = ""
     root.commandLatestQualifies = false
     root.commandLatestDurationMs = 0
+    root.commandLatestStatus = 0
     root.commandFlashUntil = 0
     root.commandFlashResult = ""
     root.commandDismissedFinishKey = ""
@@ -356,6 +555,7 @@ Item {
     root.commandLatestResult = result
     root.commandLatestQualifies = qualifies
     root.commandLatestDurationMs = durationMs
+    root.commandLatestStatus = status
     // Publish the key last: PetController observes this signal and must see
     // the complete result tuple, not the previous event's payload.
     root.commandLatestFinishKey = key
@@ -775,6 +975,25 @@ Item {
   readonly property string shellIntegrationPath: Qt.resolvedUrl("bin/omarchy-dropdown-terminal-shell").toString().replace(/^file:\/\//, "")
 
   Process {
+    id: grabMarginProcess
+    command: ["bash", "-c", "hyprctl -j getoption general:border_size; hyprctl -j getoption general:extend_border_grab_area; hyprctl -j getoption general:resize_on_border"]
+    stdout: StdioCollector { id: grabMarginOutput; waitForEnd: true }
+    running: false
+    onExited: {
+      var raw = String(grabMarginOutput.text || "")
+      var options = root.parseGrabOptions(raw)
+      if (!options) {
+        root.grabMargin = root.fallbackGrabMargin
+        root.logDebug("grab margin query failed; using fallback " + root.fallbackGrabMargin + "px")
+      } else {
+        root.grabMargin = options.margin
+        root.logDebug("grab margin=" + options.margin + "px; resize_on_border=" + options.resizeOnBorder)
+      }
+      root.grabMarginReady = true
+    }
+  }
+
+  Process {
     id: runtimeStateRootProcess
     command: ["bash", root.helperPath, "state-root"]
     stdout: StdioCollector { id: runtimeStateRootOutput; waitForEnd: true }
@@ -826,9 +1045,37 @@ Item {
   }
   onTerminalVisibleChanged: {
     if (root.terminalVisible) {
+      root.grabMarginReady = false
+      if (root.petEnabled && root.petInteraction) root.refreshGrabMargin()
       terminalStateRefreshTimer.restart()
       root.clearCommandUnread()
     }
+  }
+  onPetEnabledChanged: {
+    if (!root.petEnabled) root.grabMarginReady = false
+    else if (root.terminalVisible && root.petInteraction) root.refreshGrabMargin()
+  }
+  onPetInteractionChanged: {
+    root.grabMarginReady = false
+    if (root.terminalVisible && root.petEnabled && root.petInteraction) root.refreshGrabMargin()
+  }
+  onPetRememberPositionChanged: {
+    if (root.petRememberPosition) root.requestPetStateRead()
+    else {
+      petStateWriteTimer.stop()
+      petStateReadTimer.stop()
+      root.pendingPetState = null
+      root.petStateWriter = ""
+    }
+  }
+  onRuntimeStateRootChanged: root.requestPetStateRead()
+  onTerminalMonitorChanged: {
+    var newOwner = root.terminalMonitor ? String(root.terminalMonitor.name || "") : ""
+    if (root.petStateWriter && root.petStateWriter !== newOwner)
+      root.flushPetState(root.petStateWriter)
+    // A new owner must reload before its first coalesced write. This also
+    // prevents a stale sibling snapshot from being used after a transfer.
+    root.requestPetStateRead()
   }
   onTerminalFocusedChanged: if (root.terminalFocused) root.clearCommandUnread()
 
@@ -893,6 +1140,9 @@ Item {
       } else if (name === "movewindow" || name === "movewindowv2") {
         root.refreshToplevels()
       } else if (name === "configreloaded") {
+        root.grabMarginReady = false
+        if (root.terminalVisible && root.petEnabled && root.petInteraction)
+          root.refreshGrabMargin(true)
         root.refreshObservedState()
       }
       // activewindow/activewindowv2 intentionally do not refresh: the host's

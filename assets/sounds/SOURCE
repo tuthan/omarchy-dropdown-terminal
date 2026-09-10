@@ -1,0 +1,4 @@
+pet.ogg     <- /usr/share/sounds/freedesktop/stereo/bell.oga
+success.ogg <- /usr/share/sounds/freedesktop/stereo/complete.oga
+failure.ogg <- /usr/share/sounds/freedesktop/stereo/dialog-warning.oga
+land.ogg    <- /usr/share/sounds/freedesktop/stereo/message.oga

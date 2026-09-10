@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.2.0
+
+- Add room-aware whole-border pet roaming with wall, descending-climb, ledge,
+  carried, hover, and corner-compensation posture handling across all bundled
+  packs.
+- Add drag-to-relocate, optional pointer-awareness halos, and versioned runtime
+  position memory with a single atomic writer.
+- Add validated authored voice lines and optional rate-limited `pw-play`/
+  `paplay` sound cues, both off by default and reduced-motion safe.
+- Add the pet review-sheet and voice validation tools, pack-specific atlas
+  remaps, deterministic route/voice tests, and the Phase 6 settings.
+
+## 2.1.0
+
+- Polish pet locomotion with authored pixel stride timing, inline turnarounds,
+  anchor continuity, direction-aware facing, and resize-safe edge remapping.
+- Add bounded tap-and-hold petting with reduced-motion behavior and rate-limited
+  hearts, plus petInteraction and petRoaming settings.
+- Upgrade bundled pet manifests to version 2 and validate stride, speed,
+  optional actions, and projected-anchor continuity.
+
 ## Unreleased
 
 - Add finite Fire / burn, Firework, Thunder, Snow, and Rain entrance effects,

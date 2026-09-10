@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() { echo "usage: $0 validate LINES.json" >&2; exit 2; }
+[[ ${1:-} == validate && $# == 2 ]] || usage
+lines_file="$2"
+[[ -f "$lines_file" && ! -L "$lines_file" ]] || { echo "voice lines file is missing or a symlink" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "jq is unavailable" >&2; exit 1; }
+
+version="$(jq -r '.version // empty' "$lines_file" 2>/dev/null || true)"
+[[ "$version" == 1 ]] || { echo "version must be 1" >&2; exit 1; }
+
+valid_line='def valid_line:
+  (if type == "string" then {text: ., peak: 0}
+   elif type == "object" and (.text | type == "string")
+     and ((.minPeakTier // 0) | type == "number" and floor == . and . >= 0 and . <= 3)
+   then {text: .text, peak: (.minPeakTier // 0)}
+   else null end) as $line |
+  ($line != null and ($line.text | length > 0 and length <= 72
+    and (test("[[:cntrl:]]") | not)
+    and (contains("$") | not) and (contains("`") | not)
+    and (gsub("\\{status\\}|\\{duration\\}"; "") | test("[{}]") | not)));'
+events=(failed succeeded petting idle)
+tiers=(Kind Sassy Savage)
+for tier in "${tiers[@]}"; do
+  jq -e --arg tier "$tier" '.tiers[$tier] | type == "object"' "$lines_file" >/dev/null \
+    || { echo "missing tier $tier" >&2; exit 1; }
+  for event in "${events[@]}"; do
+    query="$valid_line .tiers[\$tier][\$event] | type == \"array\" and length >= 6 and length <= 40 and all(.[]; valid_line)"
+    if ! jq -e --arg tier "$tier" --arg event "$event" "$query" "$lines_file" >/dev/null; then
+      echo "tiers.$tier.$event must contain 6-40 valid lines" >&2
+      exit 1
+    fi
+  done
+  unknown="$(jq -r --arg tier "$tier" '.tiers[$tier] | keys[] | select((["failed","succeeded","petting","idle"] | index(.)) == null)' "$lines_file")"
+  [[ -z "$unknown" ]] || { echo "tiers.$tier.$unknown is unknown" >&2; exit 1; }
+done
+
+mapfile -t species_names < <(jq -r '.species // {} | keys[]' "$lines_file")
+for species in "${species_names[@]}"; do
+  mapfile -t species_tiers < <(jq -r --arg species "$species" '.species[$species] | keys[]' "$lines_file")
+  for tier in "${species_tiers[@]}"; do
+    [[ "$tier" == "Kind" || "$tier" == "Sassy" || "$tier" == "Savage" ]] \
+      || { echo "species.$species.$tier is unknown" >&2; exit 1; }
+    mapfile -t species_events < <(jq -r --arg species "$species" --arg tier "$tier" '.species[$species][$tier] | keys[]' "$lines_file")
+    for event in "${species_events[@]}"; do
+      [[ " ${events[*]} " == *" $event "* ]] \
+        || { echo "species.$species.$tier.$event is unknown" >&2; exit 1; }
+      query="$valid_line .species[\$species][\$tier][\$event] | type == \"array\" and length >= 6 and length <= 40 and all(.[]; valid_line)"
+      jq -e --arg species "$species" --arg tier "$tier" --arg event "$event" "$query" "$lines_file" >/dev/null \
+        || { echo "species.$species.$tier.$event must contain 6-40 valid lines" >&2; exit 1; }
+    done
+  done
+done
+echo "valid: $lines_file"

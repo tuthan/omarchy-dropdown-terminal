@@ -138,6 +138,11 @@ BarWidget {
     && service.effectIntensity > 0 && !service.reduceMotion
   readonly property string petDiagnostic: petLoader.item && petLoader.item.petDiagnostic
     ? String(petLoader.item.petDiagnostic) : ""
+  readonly property bool petDrag: service.petDrag
+  readonly property string petHoverHalo: service.petHoverHalo
+  readonly property string petVoice: service.petVoice
+  readonly property string petSound: service.petSound
+  readonly property bool petRememberPosition: service.petRememberPosition
 
   // BarWidget is instantiated once per output by Omarchy. Separate loaders keep
   // each optional visual stack genuinely absent when it is not selected: an

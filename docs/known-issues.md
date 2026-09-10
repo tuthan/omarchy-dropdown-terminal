@@ -15,6 +15,10 @@ Phase 0 implementation status: issues 1, 3, 4, and 5 are addressed in
 `FileView` reload in `Service.qml`. The entries below remain as the failure-mode
 record and regression-test rationale for future changes.
 
+Phase 6 status: issue 6 is resolved by the version-3 pack remap, posture-family
+anchor checks, and the copy-paste guard in `tests/run.sh`; it remains below as
+the visual defect record that motivated that work.
+
 ## 1. `wait_window_y` can never time out
 
 `bin/omarchy-dropdown-terminal:249-264`
@@ -198,6 +202,38 @@ select the numeric-id branch with `--argjson`.
 **Violates.** PD3 — a malformed monitor description yields empty geometry
 rather than a visible failure. The file's own convention is `--arg` everywhere
 else.
+
+## 6. Cat and corgi `pet.json` reuse the penguin's frame indices
+
+**Resolved in Phase 6 (release 2.2).** The three packs now use version-3,
+pack-specific mappings, with wall/ledge posture families and review tooling.
+The original failure description is retained below as historical context.
+
+`assets/pets/cat/pet.json`, `assets/pets/corgi/pet.json`
+
+The two manifests differ from each other only in `name`, and every frame index
+in them is the penguin's. The cat and corgi sheets have their own row layouts,
+so several actions show the wrong pose: `idle` (cells 16–19) plays the walk
+cycle, `walk` (24–27) plays sitting and turning poses, `climb` (12–14) and
+`corner` (8–11) play front-facing expressions, and `sleep` (60–63) ends on two
+running-away frames. The Phase 5 placeholders for `happy` and `turn` (cells 16,
+17) are walk frames in both packs and idle frames in the penguin.
+
+Confirmed on 2026-09-09 by rendering each atlas at 4x with cell numbers and
+comparing to the manifests (`docs/plan/phase-6-pet-world.md`, "Findings").
+The same pass showed that all 64 cells of all three atlases contain drawn art,
+so the Phase 5 assumption of 25 free cells per pack was wrong; the unreferenced
+cells are finished poses.
+
+**How it fails.** Visually only: the pet is recognizable but its actions do not
+match their names, and the Phase 3 acceptance criterion "a distinct, readable
+personality" is not met for two of three packs. The validator cannot catch it
+because every index is in range and every anchor is consistent.
+
+**Rule.** PD4 (the shipped behavior differs from what the docs claim) and the
+Phase 3 acceptance criteria. Scheduled in Phase 6 item 6.1, with a copy-paste
+guard in `tests/run.sh` and a review-sheet tool so a remap is checked against
+the art before it is committed.
 
 ## Not bugs, but worth knowing
 

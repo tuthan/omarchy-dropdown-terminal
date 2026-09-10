@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export LC_ALL=C
+[[ $# == 2 ]] || { echo "usage: $0 PACK_DIR OUT.png" >&2; exit 2; }
+pack_dir="$(realpath -e -- "$1")"
+out="$2"
+[[ -d "$pack_dir" && -f "$pack_dir/pet.json" ]] || { echo "invalid pack directory" >&2; exit 1; }
+command -v identify >/dev/null || { echo "ImageMagick identify is unavailable" >&2; exit 1; }
+if command -v magick >/dev/null; then
+  image_tool=magick
+elif command -v convert >/dev/null; then
+  image_tool=convert
+else
+  echo "ImageMagick magick/convert is unavailable" >&2
+  exit 1
+fi
+command -v jq >/dev/null || { echo "jq is unavailable" >&2; exit 1; }
+frame_width="$(jq -r '.atlas.frameWidth' "$pack_dir/pet.json")"
+frame_height="$(jq -r '.atlas.frameHeight' "$pack_dir/pet.json")"
+columns="$(jq -r '.atlas.columns' "$pack_dir/pet.json")"
+rows="$(jq -r '.atlas.rows' "$pack_dir/pet.json")"
+atlas="$(realpath -e -- "$pack_dir/$(jq -r '.atlas.path' "$pack_dir/pet.json")")"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+export MAGICK_MEMORY_LIMIT=128MiB MAGICK_MAP_LIMIT=256MiB MAGICK_THREAD_LIMIT=2 MAGICK_TIME_LIMIT=10
+"$image_tool" "$atlas" -filter point -resize "$((columns * frame_width * 4))x$((rows * frame_height * 4))!" "$tmp/atlas.png"
+for ((row=0; row<rows; row++)); do
+  for ((column=0; column<columns; column++)); do
+    number=$((row * columns + column))
+    "$image_tool" "$tmp/atlas.png" -fill 'rgba(0,0,0,0.45)' -stroke white -strokewidth 1 \
+      -draw "rectangle $((column * frame_width * 4)),$((row * frame_height * 4)) $(((column + 1) * frame_width * 4 - 1)),$(((row + 1) * frame_height * 4 - 1))" \
+      -fill white -stroke none -pointsize 18 -annotate "+$((column * frame_width * 4 + 3))+$((row * frame_height * 4 + 18))" "$number" "$tmp/marked.png"
+    mv "$tmp/marked.png" "$tmp/atlas.png"
+  done
+done
+strip_index=0
+while IFS= read -r action; do
+  mapfile -t frames < <(jq -r --arg action "$action" '.actions[$action].frames[]' "$pack_dir/pet.json")
+  strip_files=()
+  for index in "${!frames[@]}"; do
+    frame="${frames[index]}"
+    x=$((frame % columns * frame_width * 4))
+    y=$((frame / columns * frame_height * 4))
+    cell="$tmp/cell-$strip_index-$index.png"
+    "$image_tool" "$tmp/atlas.png" -crop "$((frame_width * 4))x$((frame_height * 4))+$x+$y" +repage "$cell"
+    ax="$(jq -r --arg action "$action" --argjson index "$index" '.actions[$action].anchors[$index].x' "$pack_dir/pet.json")"
+    ay="$(jq -r --arg action "$action" --argjson index "$index" '.actions[$action].anchors[$index].y' "$pack_dir/pet.json")"
+    marked="$tmp/marked-$strip_index-$index.png"
+    "$image_tool" "$cell" -fill red -stroke red -strokewidth 1 \
+      -draw "line $((ax * 4 - 5)),$((ay * 4)) $((ax * 4 + 5)),$((ay * 4)) line $((ax * 4)),$((ay * 4 - 5)) $((ax * 4)),$((ay * 4 + 5))" \
+      -fill white -stroke none -pointsize 13 -annotate "+2+15" "$frame" "$marked"
+    strip_files+=("$marked")
+  done
+  strip="$tmp/strip-$strip_index.png"
+  "$image_tool" "${strip_files[@]}" +append "$strip"
+  label="$tmp/label-$strip_index.png"
+  "$image_tool" -background '#202020' -fill white -pointsize 18 -gravity west -size "$(identify -format '%w' "$strip")x28" caption:"$action" "$label"
+  "$image_tool" "$label" "$strip" -append "$tmp/row-$strip_index.png"
+  strip_rows+=("$tmp/row-$strip_index.png")
+  strip_index=$((strip_index + 1))
+done < <(jq -r '.actions | keys[]' "$pack_dir/pet.json")
+"$image_tool" "$tmp/atlas.png" "${strip_rows[@]}" -append "$out"
+echo "wrote $out"

@@ -7,7 +7,10 @@ as original artwork for this repository; no third-party artwork was imported.
 Modifications: pet.png was normalized to a 256x256 RGBA PNG (8 columns by 8
 rows of 32x32 cells) with nearest-neighbor scaling and metadata stripped.
 bar.png was normalized to a separate 20x20 RGBA PNG with nearest-neighbor
-scaling. The action/frame mapping and contact anchors are authored in pet.json.
+scaling. For Phase 6, hang cells 7, 60, and 61 were authored from the pack's
+existing pixel-art frames with a 180-degree transform; all other atlas cells
+remain unchanged. The action/frame mapping and contact anchors are authored in
+pet.json.
 
 Prompt summary: original cute black-and-white penguin pixel-art sprite atlas
 and separate compact bar icon, transparent background, limited palette, hard

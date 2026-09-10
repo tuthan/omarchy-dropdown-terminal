@@ -215,6 +215,22 @@ That keeps Omarchy's cache correct, and is why a plugin holding a *separate*
 `FileView` on the same path sees nothing without `reload()`. This combination is
 the most likely way a plugin silently reads frozen settings.
 
+### Phase 6 media and pointer facts — verified 2026-09-10
+
+This host has `/usr/bin/pw-play` and `/usr/bin/paplay`, so the optional pet
+player can use either command without adding a package dependency. Quickshell
+is 0.3.1 and `QtMultimedia` is installed under
+`/usr/lib/qt6/qml/QtMultimedia`.
+
+The pet implementation deliberately uses the external players behind a lazy
+`Loader`: `petSound=Off` creates neither the sound component nor a player
+process, and `Quiet`/`Normal` start a player only for a rate-limited cue. This
+avoids loading an audio backend for the default path and keeps dependency
+failure visible when both commands are unavailable. The plan's throwaway
+masked-`PanelWindow` implicit-grab probe was not run in this headless tooling
+session; the implementation relies on the host Wayland implicit-grab contract,
+and the live drag probe remains a physical acceptance check.
+
 ### omarchy-shell costs ~47 ms per call — keep local
 
 Five sequential `omarchy-shell -q shell ping` calls took 0.235 s wall, so ~47 ms

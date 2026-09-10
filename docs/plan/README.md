@@ -22,6 +22,9 @@ This project adopts the reusable [`General Omarchy plugin design rules`](../../.
 | [phase-2-command-indicator.md](phase-2-command-indicator.md) | §1 Hidden command completion | Completion indicator |
 | [phase-3-pet.md](phase-3-pet.md) | §3 Pet | One pet pack |
 | [phase-4-tabs.md](phase-4-tabs.md) | §4 Tabs | Experimental tabs |
+| [phase-5-pet-interaction.md](phase-5-pet-interaction.md) | Release 2.1 follow-up | Pet motion polish, click-to-pet, two pet toggles |
+| [phase-6-pet-world.md](phase-6-pet-world.md) | Release 2.2 | Whole-border roaming, drag, hover, voice lines, sound, position memory |
+| [phase-7-pet-villains.md](phase-7-pet-villains.md) | Release 2.3 | Villains, encounters, bond meter |
 
 Effects and the command indicator are swapped relative to the research doc's
 numbered feature sections (the research delivery summary now mirrors this
@@ -33,6 +36,19 @@ largest trust and support-burden step in the whole plan. Shipping effects first
 also exercises the Phase 0 geometry and visibility model under real load before
 `~/.bashrc` is involved. Reverse the two if the command indicator is the feature
 that actually matters to users; nothing in the plan breaks.
+
+Phase 5 depends only on Phase 3 and is the 2.1 release. It revises the PD12
+profile row before adding a bounded input region over the pet; see its item 5.0.
+
+Phase 6 depends on Phase 5 and is the 2.2 release. It takes every item Phase 5
+listed as out of scope except villains, encounters, and the bond meter, which
+are Phase 7, the 2.3 release, at the user's direction on 2026-09-09. Phase 6
+revises the PD12 row a second time and adds a persisted-state row before any
+input or state code; see its item 6.0. Its first work item corrects the bundled
+pet manifests, whose cat and corgi frame indices were copied from the penguin
+(known issue #6). Phase 7 depends on Phase 6 for the remapped atlases, the
+input-region union rule, the speech bubble, and the single-writer state
+discipline.
 
 Phases 3 and 4 are independent of each other and of Phase 2. Phase 4 is the only
 phase that can end in a decision not to ship.

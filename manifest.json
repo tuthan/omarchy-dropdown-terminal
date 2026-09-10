@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.tuthan.dropdown-terminal",
   "name": "Dropdown Terminal",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "author": "Hung Vo",
   "license": "MIT",
-  "description": "A focused Omarchy dropdown terminal with bounded entrance effects, click-through pets, and privacy-preserving command completion indicators.",
+  "description": "A focused Omarchy dropdown terminal with bounded entrance effects, interactive pets, and privacy-preserving command completion indicators.",
   "kinds": [
     "bar-widget"
   ],
@@ -120,7 +120,7 @@
         "key": "petEnabled",
         "type": "boolean",
         "label": "Pet",
-        "description": "Show a decorative pet on the terminal edge. The pet is click-through and never reports command status.",
+        "description": "Show a decorative pet on the terminal edge. Tap or hold it to pet it; it never changes the meaning of the command indicator.",
         "defaultValue": false
       },
       {
@@ -138,6 +138,59 @@
         "options": ["On focus", "Always while visible", "Celebrations only"],
         "description": "Choose when the selected pet may walk, sleep, or react while the terminal is visible.",
         "defaultValue": "On focus"
+      },
+      {
+        "key": "petInteraction",
+        "type": "boolean",
+        "label": "Respond to clicks",
+        "description": "Allow a bounded input region over the visible pet. Clicks elsewhere, including the terminal resize grab ring, still reach the terminal.",
+        "defaultValue": true
+      },
+      {
+        "key": "petRoaming",
+        "type": "enum",
+        "label": "Pet roaming",
+        "options": ["Top edge", "Whole border"],
+        "description": "Choose whether the pet walks along the top edge or uses the whole border when its pack has wall-safe climb frames.",
+        "defaultValue": "Top edge"
+      },
+      {
+        "key": "petDrag",
+        "type": "boolean",
+        "label": "Drag to move",
+        "description": "Pick up the pet and drop it at the nearest allowed edge position.",
+        "defaultValue": true
+      },
+      {
+        "key": "petHoverHalo",
+        "type": "enum",
+        "label": "Pointer awareness",
+        "options": ["Off", "Small", "Large"],
+        "description": "Add a 24 or 48 pixel awareness halo. Clicks inside the halo reach the pet layer, not the desktop or a window behind it.",
+        "defaultValue": "Off"
+      },
+      {
+        "key": "petVoice",
+        "type": "enum",
+        "label": "Voice",
+        "options": ["Off", "Kind", "Sassy", "Savage"],
+        "description": "Show an authored speech bubble for qualifying command results and petting.",
+        "defaultValue": "Off"
+      },
+      {
+        "key": "petSound",
+        "type": "enum",
+        "label": "Sound",
+        "options": ["Off", "Quiet", "Normal"],
+        "description": "Play short pet cues through pw-play or paplay. Sound is independent of reduced motion.",
+        "defaultValue": "Off"
+      },
+      {
+        "key": "petRememberPosition",
+        "type": "boolean",
+        "label": "Remember position",
+        "description": "Restore the pet's edge and position after a shell reload during this login session.",
+        "defaultValue": true
       },
       {
         "key": "reduceMotion",

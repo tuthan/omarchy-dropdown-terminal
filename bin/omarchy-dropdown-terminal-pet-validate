@@ -76,6 +76,29 @@ command -v identify >/dev/null 2>&1 || fail "PNG decoder identify is unavailable
 manifest_size="$(stat -c '%s' -- "$manifest" 2>/dev/null || printf 0)"
 (( manifest_size <= max_json )) || fail "pet.json exceeds the size limit"
 
+# Keep the most useful version-2 failure reason visible to pack authors. The
+# schema check below still rejects malformed values; this preflight names the
+# authored stride and cycle when the resulting speed is unsafe.
+manifest_version="$(jq -r '.version // empty' "$manifest" 2>/dev/null || true)"
+manifest_kind="$(jq -r '.kind // "pet"' "$manifest" 2>/dev/null || true)"
+[[ "$manifest_kind" == "pet" ]] || fail "manifest kind '$manifest_kind' is unsupported; only pet packs are accepted"
+if [[ "$manifest_version" == "2" ]]; then
+  for action in walk climb; do
+    stride="$(jq -r --arg action "$action" '.actions[$action].stride // empty' "$manifest" 2>/dev/null || true)"
+    cycle="$(jq -r --arg action "$action" '(.actions[$action].durations // []) | add // empty' "$manifest" 2>/dev/null || true)"
+    if [[ "$stride" =~ ^[0-9]+([.][0-9]+)?$ && "$cycle" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      speed="$(awk -v stride="$stride" -v scale="$(jq -r '.atlas.renderScale' "$manifest")" -v cycle="$cycle" 'BEGIN { printf "%.2f", stride * scale * 1000 / cycle }')"
+      if awk -v speed="$speed" 'BEGIN { exit !(speed < 12 || speed > 80) }'; then
+        fail "$action stride $stride""px over $cycle""ms produces $speed"" px/s; expected 12-80"
+      fi
+    fi
+  done
+  if jq -e '. as $root | any(["idle", "walk", "turn", "happy", "sleep", "dance", "success", "failure", "land"][];
+      . as $name | $root.actions[$name] != null and any($root.actions[$name].anchors[]; .x != 16))' "$manifest" >/dev/null 2>&1; then
+    fail "version 2 standing anchors must be centered at x=16"
+  fi
+fi
+
 json_ok=''
 if ! json_ok="$(jq -e '
   def pathok:
@@ -83,9 +106,9 @@ if ! json_ok="$(jq -e '
     and (startswith("/") | not) and (contains("..") | not)
     and (test("[[:cntrl:]]") | not);
   def intbetween($low; $high): type == "number" and . == floor and . >= $low and . <= $high;
-  def seqok($max_frame):
+  def seqok($max_frame; $duration_low; $duration_high; $min_frames; $max_frames):
     type == "object"
-    and (.frames | type == "array" and length >= 1 and length <= 16)
+    and (.frames | type == "array" and length >= $min_frames and length <= $max_frames)
     and (.durations | type == "array")
     and (.anchors | type == "array")
     and (.frames | length) == (.durations | length)
@@ -93,12 +116,26 @@ if ! json_ok="$(jq -e '
     and (.loop | type == "boolean")
     and (.mirrorSafe | type == "boolean")
     and all(.frames[]; intbetween(0; $max_frame))
-    and all(.durations[]; intbetween(16; 4000))
+    and all(.durations[]; intbetween($duration_low; $duration_high))
     and all(.anchors[]; type == "object" and (.x | type == "number" and . >= 0 and . <= 32)
       and (.y | type == "number" and . >= 0 and . <= 32))
     and (([.durations[]] | add) <= 12000 or .loop);
+  def projected($sequence; $index; $mirrored):
+    $sequence.anchors[$index] as $anchor |
+    {x: (if $mirrored and $sequence.mirrorSafe then 32 - $anchor.x else $anchor.x end), y: $anchor.y};
+  def transitionok($from; $to; $scale):
+    all([false, true][]; . as $mirrored |
+      (projected($from; ($from.anchors | length) - 1; $mirrored)) as $last |
+      (projected($to; 0; $mirrored)) as $first |
+      (($last.x - $first.x | fabs) * $scale <= 1
+        and ($last.y - $first.y | fabs) * $scale <= 1));
+  def speedok($sequence; $scale):
+    ($sequence.stride | intbetween(4; 32))
+    and (([ $sequence.durations[] ] | add) as $cycle |
+      (($sequence.stride * $scale / $cycle * 1000) >= 12
+        and ($sequence.stride * $scale / $cycle * 1000) <= 80));
   . as $root |
-  $root.version == 1
+  ($root.version == 1 or $root.version == 2 or $root.version == 3)
   and ($root.name | type == "string" and length > 0 and length <= 128)
   and all(["author", "source", "license"][]; $root[.] | type == "string" and length > 0 and length <= 256)
   and ($root.atlas | type == "object")
@@ -113,13 +150,133 @@ if ! json_ok="$(jq -e '
     and (.width | intbetween(1; 64)) and (.height | intbetween(1; 64)))
   and ($root.actions | type == "object")
   and all(["peek", "enter", "land", "idle", "walk", "corner", "climb", "dance", "success", "failure", "exit", "sleep"][];
-    $root.actions[.] | seqok(($root.atlas.columns * $root.atlas.rows) - 1))
+    . as $name | $root.actions[$name]
+      | seqok(($root.atlas.columns * $root.atlas.rows) - 1;
+        (if $root.version == 2 and ($name == "walk" or $name == "climb") then 41 else 16 end);
+        (if $root.version == 2 and ($name == "walk" or $name == "climb") then 250 else 4000 end);
+        1; 16))
+  and (if $root.version == 3 then
+    all(["climbDown", "hang"][]; . as $name | $root.actions[$name]
+      | seqok(($root.atlas.columns * $root.atlas.rows) - 1; 16; 4000; 1; 16))
+    else true end)
   and ($root.fallbacks | type == "object")
   and all($root.fallbacks | to_entries[];
     . as $entry | ($entry.value | type == "string")
       and ($entry.value != $entry.key) and ($root.actions[$entry.value] != null))
+  and (if $root.version == 1 then true else
+    ($root.actions.walk | speedok(.; $root.atlas.renderScale))
+    and ($root.actions.climb | speedok(.; $root.atlas.renderScale))
+    and (($root.actions.happy == null)
+      or ($root.actions.happy | seqok(($root.atlas.columns * $root.atlas.rows) - 1; 16; 4000; 2; 6) and .loop == true))
+    and (($root.actions.turn == null)
+      or ($root.actions.turn | seqok(($root.atlas.columns * $root.atlas.rows) - 1; 16; 4000; 2; 4) and .loop == false))
+    and (($root.actions.climbDown == null)
+      or ($root.actions.climbDown | seqok(($root.atlas.columns * $root.atlas.rows) - 1;
+        (if $root.version == 2 then 41 else 16 end);
+        (if $root.version == 2 then 250 else 4000 end); 1; 16)))
+    and (if $root.actions.happy == null then ($root.fallbacks.happy == "dance" or $root.fallbacks.happy == "success") else true end)
+    and (if $root.actions.turn == null then $root.fallbacks.turn == "idle" else true end)
+    and all(["idle", "walk", "turn", "happy", "sleep", "dance", "success", "failure", "land"][];
+      . as $name | if $root.actions[$name] == null then true else
+        all($root.actions[$name].anchors[]; .x == 16) end)
+    and (if $root.version == 3 then all([["land", "idle"], ["idle", "walk"], ["walk", "idle"],
+      ["walk", "notice"], ["notice", "idle"], ["idle", "happy"], ["happy", "idle"],
+      ["idle", "sleep"], ["sleep", "idle"], ["idle", "dance"], ["idle", "success"],
+      ["idle", "failure"], ["idle", "alert"], ["alert", "brave"], ["alert", "cower"],
+      ["brave", "victory"], ["cower", "victory"], ["cower", "failure"], ["victory", "idle"],
+      ["carried", "land"], ["climb", "climbDown"], ["climbDown", "climb"],
+      ["climb", "wallIdle"], ["wallIdle", "climb"], ["hang", "ledgeIdle"],
+      ["ledgeIdle", "hang"]][]; . as $pair |
+      if $root.actions[$pair[0]] == null or $root.actions[$pair[1]] == null then true
+      else transitionok($root.actions[$pair[0]]; $root.actions[$pair[1]]; $root.atlas.renderScale) end)
+    else all([["land", "idle"], ["idle", "walk"], ["walk", "idle"], ["walk", "turn"],
+      ["turn", "idle"], ["idle", "happy"], ["happy", "idle"], ["walk", "happy"],
+      ["idle", "sleep"], ["sleep", "idle"], ["idle", "dance"], ["idle", "success"],
+      ["idle", "failure"], ["walk", "corner"], ["corner", "climb"], ["climb", "corner"],
+      ["corner", "walk"]][]; . as $pair |
+      if $root.actions[$pair[0]] == null or $root.actions[$pair[1]] == null then true
+      else transitionok($root.actions[$pair[0]]; $root.actions[$pair[1]]; $root.atlas.renderScale) end) end)
+  end)
 ' "$manifest")"; then
   fail "pet.json failed schema validation"
+fi
+
+if [[ "$manifest_version" == "3" ]]; then
+  # Version 3 makes wall and ledge posture families explicit. These checks
+  # name the action/frame so pack authors can fix an anchor without guessing.
+  for required_world in climbDown hang; do
+    jq -e --arg action "$required_world" '.actions[$action] != null' "$manifest" >/dev/null \
+      || fail "version 3 requires actions.$required_world"
+  done
+  declare -A v3_fallbacks=(
+    [climbDown]=climb [hang]=idle [notice]=idle [alert]=idle [brave]=dance
+    [cower]=failure [victory]=success [carried]=idle [cornerBottom]=hang
+    [wallIdle]=climb [wallHappy]=climb [ledgeIdle]=hang [ledgeHappy]=hang
+  )
+  for action in "${!v3_fallbacks[@]}"; do
+    if jq -e --arg action "$action" '.actions[$action] != null' "$manifest" >/dev/null; then
+      expected="${v3_fallbacks[$action]}"
+      actual="$(jq -r --arg action "$action" '.fallbacks[$action] // empty' "$manifest")"
+      [[ "$actual" == "$expected" ]] || fail "$action fallback must be $expected"
+    fi
+  done
+  for wall_action in climb climbDown; do
+    jq -e --arg action "$wall_action" '.actions[$action].mirrorSafe == true' "$manifest" >/dev/null \
+      || fail "$wall_action must be mirrorSafe for wall roaming"
+    wall_stride="$(jq -r --arg action "$wall_action" '.actions[$action].stride // empty' "$manifest")"
+    wall_cycle="$(jq -r --arg action "$wall_action" '(.actions[$action].durations // []) | add // empty' "$manifest")"
+    wall_speed="$(awk -v stride="$wall_stride" -v scale="$(jq -r '.atlas.renderScale' "$manifest")" -v cycle="$wall_cycle" 'BEGIN { if (cycle > 0) printf "%.2f", stride * scale * 1000 / cycle; else print 0 }')"
+    awk -v speed="$wall_speed" 'BEGIN { exit !(speed < 12 || speed > 80) }' \
+      && fail "$wall_action stride produces $wall_speed px/s; expected 12-80"
+  done
+  jq -e '.actions.hang.mirrorSafe == true' "$manifest" >/dev/null \
+    || fail "hang must be mirrorSafe for bottom-edge roaming"
+  hang_stride="$(jq -r '.actions.hang.stride // empty' "$manifest")"
+  hang_cycle="$(jq -r '.actions.hang.durations | add // empty' "$manifest")"
+  hang_speed="$(awk -v stride="$hang_stride" -v scale="$(jq -r '.atlas.renderScale' "$manifest")" -v cycle="$hang_cycle" 'BEGIN { if (cycle > 0) printf "%.2f", stride * scale * 1000 / cycle; else print 0 }')"
+  awk -v speed="$hang_speed" 'BEGIN { exit !(speed < 12 || speed > 80) }' \
+    && fail "hang stride produces $hang_speed px/s; expected 12-80"
+
+  floor_actions=(peek enter land idle walk corner turn happy sleep dance success failure exit notice alert brave cower victory carried)
+  for action in "${floor_actions[@]}"; do
+    count="$(jq -r --arg action "$action" '.actions[$action].anchors // [] | length' "$manifest")"
+    for ((index=0; index<count; index++)); do
+      jq -e --arg action "$action" --argjson index "$index" \
+        '.actions[$action].anchors[$index].x == 16 and .actions[$action].anchors[$index].y >= 24 and .actions[$action].anchors[$index].y <= 32' \
+        "$manifest" >/dev/null || fail "$action frame $index is outside the floor anchor region"
+    done
+  done
+  for action in climb climbDown wallIdle wallHappy; do
+    count="$(jq -r --arg action "$action" '.actions[$action].anchors // [] | length' "$manifest")"
+    for ((index=0; index<count; index++)); do
+      jq -e --arg action "$action" --argjson index "$index" \
+        '.actions[$action].anchors[$index].x >= 0 and .actions[$action].anchors[$index].x <= 6 and .actions[$action].anchors[$index].y >= 12 and .actions[$action].anchors[$index].y <= 20' \
+        "$manifest" >/dev/null || fail "$action frame $index is outside the wall anchor region"
+    done
+  done
+  for action in hang ledgeIdle ledgeHappy; do
+    count="$(jq -r --arg action "$action" '.actions[$action].anchors // [] | length' "$manifest")"
+    for ((index=0; index<count; index++)); do
+      jq -e --arg action "$action" --argjson index "$index" \
+        '.actions[$action].anchors[$index].x == 16 and .actions[$action].anchors[$index].y >= 0 and .actions[$action].anchors[$index].y <= 4' \
+        "$manifest" >/dev/null || fail "$action frame $index is outside the ledge anchor region"
+    done
+  done
+
+  mapfile -t action_names < <(jq -r '.actions | keys[]' "$manifest")
+  for ((i=0; i<${#action_names[@]}; i++)); do
+    for ((j=i+1; j<${#action_names[@]}; j++)); do
+      left="${action_names[i]}"
+      right="${action_names[j]}"
+      while IFS= read -r cell; do
+        [[ -n "$cell" ]] || continue
+        allowed="$(jq -r --arg left "$left" --arg right "$right" \
+          '((.actions[$left].sharesWith // []) | index($right)) != null or ((.actions[$right].sharesWith // []) | index($left)) != null' "$manifest")"
+        [[ "$allowed" == true ]] || fail "actions $left and $right share cell $cell without sharesWith"
+      done < <(comm -12 <(jq -r --arg action "$left" '.actions[$action].frames[]' "$manifest" | sort -u) \
+        <(jq -r --arg action "$right" '.actions[$action].frames[]' "$manifest" | sort -u))
+    done
+  done
 fi
 
 relative_file() {

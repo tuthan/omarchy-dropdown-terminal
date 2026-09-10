@@ -1,0 +1,4 @@
+The bundled cues start from the Freedesktop sound-theme samples supplied by the
+host's freedesktop sound theme. They were trimmed to a maximum of 280 ms and
+re-encoded as Ogg Vorbis to keep the runtime assets bounded; see SOURCE for the
+source paths and the host package's licensing terms.

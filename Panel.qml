@@ -50,6 +50,26 @@ Panel {
     return ["On focus", "Always while visible", "Celebrations only"].indexOf(value) >= 0
       ? value : "On focus"
   }
+  readonly property bool petInteraction: root.setting("petInteraction", true) !== false
+  readonly property string petRoaming: {
+    var value = String(root.setting("petRoaming", "Top edge"))
+    return ["Top edge", "Whole border"].indexOf(value) >= 0 ? value : "Top edge"
+  }
+  readonly property bool petDrag: root.hostWidget ? root.hostWidget.petDrag : root.setting("petDrag", true) !== false
+  readonly property string petHoverHalo: {
+    var value = root.hostWidget ? root.hostWidget.petHoverHalo : String(root.setting("petHoverHalo", "Off"))
+    return ["Off", "Small", "Large"].indexOf(value) >= 0 ? value : "Off"
+  }
+  readonly property string petVoice: {
+    var value = root.hostWidget ? root.hostWidget.petVoice : String(root.setting("petVoice", "Off"))
+    return ["Off", "Kind", "Sassy", "Savage"].indexOf(value) >= 0 ? value : "Off"
+  }
+  readonly property string petSound: {
+    var value = root.hostWidget ? root.hostWidget.petSound : String(root.setting("petSound", "Off"))
+    return ["Off", "Quiet", "Normal"].indexOf(value) >= 0 ? value : "Off"
+  }
+  readonly property bool petRememberPosition: root.hostWidget
+    ? root.hostWidget.petRememberPosition : root.setting("petRememberPosition", true) !== false
   readonly property bool reduceMotion: root.setting("reduceMotion", false) === true
   readonly property bool urgencyIndicator: root.setting("urgencyIndicator", true) !== false
   readonly property bool commandTracking: root.setting("commandTracking", false) === true
@@ -328,6 +348,13 @@ Panel {
   }
   function setPetEnabled(value) { persistSettings({ petEnabled: value }) }
   function setPetActivity(value) { persistSettings({ petActivity: value }) }
+  function setPetInteraction(value) { persistSettings({ petInteraction: value }) }
+  function setPetRoaming(value) { persistSettings({ petRoaming: value }) }
+  function setPetDrag(value) { persistSettings({ petDrag: value }) }
+  function setPetHoverHalo(value) { persistSettings({ petHoverHalo: value }) }
+  function setPetVoice(value) { persistSettings({ petVoice: value }) }
+  function setPetSound(value) { persistSettings({ petSound: value }) }
+  function setPetRememberPosition(value) { persistSettings({ petRememberPosition: value }) }
   function setReduceMotion(value) { persistSettings({ reduceMotion: value }) }
   function setUrgencyIndicator(value) { persistSettings({ urgencyIndicator: value }) }
   function setCommandTracking(value) { persistSettings({ commandTracking: value }) }
@@ -796,24 +823,31 @@ Panel {
 
       Text {
         width: parent.width
-        text: "A decorative, click-through pet lives on the terminal edge. It never changes the meaning of the command indicator."
+        text: "A decorative pet lives on the terminal edge. Tap or hold to pet it, drag to move it. It never changes the meaning of the command indicator."
         color: Util.alpha(root.contentForeground, 0.5)
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
       }
 
-      Text {
+      Column {
         width: parent.width
         visible: root.petDiagnostic !== ""
-        text: root.petDiagnostic
-        color: Color.urgent
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: Text.WordWrap
+        spacing: Style.space(4)
+        Repeater {
+          model: root.petDiagnostic === "" ? [] : root.petDiagnostic.split("\n")
+          delegate: Text {
+            width: parent.width
+            text: modelData
+            color: Color.urgent
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+        }
       }
 
-      Row {
+      Flow {
         width: parent.width
         spacing: Style.space(8)
         Button {
@@ -821,7 +855,7 @@ Panel {
           text: (on ? "✓ " : "") + "Pet"
           selected: on
           tooltipText: on
-            ? "On: show the click-through pet while the terminal is visible."
+            ? "On: show the pet while the terminal is visible."
             : "Off: do not create the pet layer."
           focusable: true
           bordered: true
@@ -841,6 +875,43 @@ Panel {
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
           onClicked: root.setReduceMotion(!on)
+        }
+        Button {
+          property bool on: root.petInteraction
+          text: (on ? "✓ " : "") + "Respond to clicks"
+          selected: on
+          tooltipText: on
+            ? "On: tap or hold the pet to pet it. Clicks anywhere else still reach the terminal."
+            : "Off: the pet is fully click-through."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setPetInteraction(!on)
+        }
+        Button {
+          property bool on: root.petDrag
+          text: (on ? "✓ " : "") + "Drag to move"
+          selected: on
+          tooltipText: on ? "On: hold and drag the pet to another allowed edge position."
+            : "Off: the pet stays on its current edge position."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setPetDrag(!on)
+        }
+        Button {
+          property bool on: root.petRememberPosition
+          text: (on ? "✓ " : "") + "Remember position"
+          selected: on
+          tooltipText: on ? "On: restore the pet position after a shell reload."
+            : "Off: do not read or write pet position state."
+          focusable: true
+          bordered: true
+          foreground: root.contentForeground
+          fontFamily: root.contentFontFamily
+          onClicked: root.setPetRememberPosition(!on)
         }
       }
 
@@ -884,6 +955,87 @@ Panel {
         accent: Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setPetActivity(value) }
+      }
+
+      Text {
+        text: "Roaming"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      ButtonGroup {
+        width: parent.width
+        options: [
+          { value: "Top edge", label: "Top edge", tooltip: "Walk back and forth along the top edge." },
+          { value: "Whole border", label: "Whole border", tooltip: "Climb the sides and cross the bottom when the pack has wall-safe climb frames." }
+        ]
+        value: root.petRoaming
+        foreground: root.contentForeground
+        accent: Color.accent
+        fontFamily: root.contentFontFamily
+        onChanged: function(value) { root.setPetRoaming(value) }
+      }
+
+      Text {
+        text: "Voice"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+      ButtonGroup {
+        width: parent.width
+        options: [
+          { value: "Off", label: "Off", tooltip: "Do not show speech bubbles or load voice lines." },
+          { value: "Kind", label: "Kind", tooltip: "Gentle authored reactions to qualifying results and petting." },
+          { value: "Sassy", label: "Sassy", tooltip: "Playful authored reactions without command text." },
+          { value: "Savage", label: "Savage", tooltip: "Sharper authored reactions limited to status and duration facts." }
+        ]
+        value: root.petVoice
+        foreground: root.contentForeground
+        accent: Color.accent
+        fontFamily: root.contentFontFamily
+        onChanged: function(value) { root.setPetVoice(value) }
+      }
+
+      Text {
+        text: "Pointer awareness"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+      ButtonGroup {
+        width: parent.width
+        options: [
+          { value: "Off", label: "Off", tooltip: "Only the sprite receives pointer input." },
+          { value: "Small", label: "Small", tooltip: "Add a 24 px halo; clicks inside it are consumed by the pet layer." },
+          { value: "Large", label: "Large", tooltip: "Add a 48 px halo; clicks inside it are consumed by the pet layer." }
+        ]
+        value: root.petHoverHalo
+        foreground: root.contentForeground
+        accent: Color.accent
+        fontFamily: root.contentFontFamily
+        onChanged: function(value) { root.setPetHoverHalo(value) }
+      }
+
+      Text {
+        text: "Sound"
+        color: Util.alpha(root.contentForeground, 0.64)
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+      }
+      ButtonGroup {
+        width: parent.width
+        options: [
+          { value: "Off", label: "Off", tooltip: "Do not load an audio player or start a sound process." },
+          { value: "Quiet", label: "Quiet", tooltip: "Play rate-limited cues at low volume." },
+          { value: "Normal", label: "Normal", tooltip: "Play rate-limited cues at normal volume." }
+        ]
+        value: root.petSound
+        foreground: root.contentForeground
+        accent: Color.accent
+        fontFamily: root.contentFontFamily
+        onChanged: function(value) { root.setPetSound(value) }
       }
 
       }

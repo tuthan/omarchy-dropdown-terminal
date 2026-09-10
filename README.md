@@ -2,7 +2,7 @@
 
 An Omarchy Quickshell plugin for summoning the configured default terminal as a
 fast, focused floating overlay on the current Hyprland workspace—with bounded
-entrance effects, click-through pets, and optional privacy-preserving command
+entrance effects, interactive pets, and optional privacy-preserving command
 completion indicators.
 
 ![Dropdown Terminal preview](preview.png)
@@ -11,6 +11,19 @@ completion indicators.
 
 https://github.com/user-attachments/assets/e3437c1d-00c5-451e-b6e4-2c86dd82100a
 
+
+## What's new in 2.2
+
+Phase 6 turns the pet into an optional, bounded interactive world:
+
+- Whole-border roaming uses validated wall and ledge posture families, with
+  room-aware edge selection and continuous corner anchor compensation.
+- Drag the pet to another allowed edge, enable an optional pointer-awareness
+  halo, and remember its position across shell reloads.
+- Optional authored speech bubbles support `Kind`, `Sassy`, and `Savage` tones;
+  optional short sound cues use `pw-play` or `paplay` and remain off by default.
+- All new settings are defensive, theme-aware, reduced-motion compatible, and
+  covered by the pack/voice validators and deterministic route tests.
 
 ## What's new in 2.0
 
@@ -134,6 +147,9 @@ The panel is organized into two tabs to keep related controls together:
 Long effect lists stay inside the panel's scrollable content area, so the
 settings card remains usable at smaller heights.
 
+The Animation & pets tab also exposes tap-and-hold petting, top-edge or
+whole-border roaming, pet activity, and reduced-motion controls.
+
 The bar widget settings include `Show icon`. Turn it off to hide the icon while
 keeping the global shortcut and terminal service active.
 
@@ -156,11 +172,25 @@ failure, or attention.
 ### Pets and reduced motion
 
 The pet is disabled by default. Choose the **Penguin**, **Fluffy cat**, or
-**Corgi** pack when enabling it. Each stays on the terminal edge and remains
-click-through; **On focus** permits focus reactions, **Always visible** also
-permits infrequent walking and sleep, and **Celebrations** limits it to
-qualifying precise command results from the explicit shell integration.
+**Corgi** pack when enabling it. **Respond to clicks** adds a bounded sprite-only
+input region: tap or hold the pet for its authored happy reaction, while
+clicks in the terminal and its resize grab ring still reach the terminal.
+**Top edge** is the default roaming mode; **Whole border** is available when a pack
+supplies wall-safe climb and descending art. **Drag to move** picks the pet up
+with a carried pose and snaps release to the nearest allowed edge. **Pointer
+awareness** is Off by default; an enabled halo intentionally consumes clicks in
+its pixels, so the panel explains that trade-off. On focus permits focus
+reactions, Always visible also permits infrequent walking and sleep, and
+Celebrations limits it to qualifying precise command results from the explicit
+shell integration.
 Generic urgency never produces a success or failure pet reaction.
+
+**Voice** is Off by default and shows only authored lines based on petting or
+precise qualifying results. Lines never contain command text and never repeat
+within a five-line window. **Sound** is also Off by default and is loaded only
+when selected; missing players are reported as unavailable. **Remember position**
+stores a short-lived, versioned state document under the runtime directory and
+restores it only for the current terminal owner and species.
 
 **Reduce motion** holds the pet on a static pose, suppresses entrance particles,
 and changes the Phase 2 bar indicator to a colored dot. It is plugin-local

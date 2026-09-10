@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "tiers": {
+    "Kind": {
+      "failed": ["Exit {status}. Happens to the best of us.", "A small detour.", "We can try that again.", "The shell said no.", "Every bug teaches something.", "Close, in spirit."],
+      "succeeded": ["Exit 0. Nicely done.", "That landed cleanly.", "A quiet little victory.", "The shell approves.", "Good work, friend.", "One step complete."],
+      "petting": ["That is lovely.", "Thank you for the scritch.", "A very good human.", "I like this arrangement.", "More of that, please.", "Purrhaps again?"],
+      "idle": ["I am keeping watch.", "The edge is cozy.", "All quiet here.", "A tiny stretch.", "Still here.", "Nice view from up here."]
+    },
+    "Sassy": {
+      "failed": ["Exit {status}? Bold strategy.", "The shell has notes.", "That was not the plan.", "A dramatic little failure.", "Try reading the error next time.", "I saw that."],
+      "succeeded": ["Exit 0? Finally.", "Look who got it right.", "Not bad at all.", "The shell may keep you.", "A suspiciously good result.", "I will allow it."],
+      "petting": ["You may continue.", "Acceptable scritches.", "I suppose that was nice.", "Do not stop now.", "My fee is affection.", "Again, obviously."],
+      "idle": ["I am busy looking fabulous.", "The terminal edge suits me.", "Try not to break anything.", "I have seen worse.", "Waiting for your next move.", "This is fine."]
+    },
+    "Savage": {
+      "failed": ["Exit {status}. Truly ambitious.", "That command fell over.", "The shell deserves better.", "A spectacular misfire.", "You had one job.", "Please consult reality."],
+      "succeeded": ["Only {duration}. I aged.", "Exit 0. Miracles happen.", "You finally pressed the right keys.", "The result is good; the process was not.", "I am almost impressed.", "Do not get comfortable."],
+      "petting": ["Fine. You may pet me.", "That was barely adequate.", "Earn your next scritch.", "I tolerate this ritual.", "At least you are useful here.", "More. Quickly."],
+      "idle": ["I am judging the layout.", "The edge is doing all the work.", "Your terminal is a mess.", "I could do this faster.", "Wake me when it matters.", "Still waiting."]
+    }
+  },
+  "species": {
+    "Cat": {
+      "Sassy": {
+        "failed": ["Exit {status}. The cat is unimpressed.", "No treats for that result.", "The cat saw the mistake.", "A poor showing.", "Try with more dignity.", "The whiskers expected better."]
+      }
+    }
+  }
+}

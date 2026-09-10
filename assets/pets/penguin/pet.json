@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 3,
   "name": "Penguin",
   "author": "OpenAI image generation tool",
   "source": "Original asset generated for Dropdown Terminal on 2026-09-05; see SOURCE.",
@@ -51,7 +51,8 @@
       "durations": [110, 110, 110, 110],
       "loop": true,
       "mirrorSafe": true,
-      "anchors": [{"x": 28, "y": 30}, {"x": 28, "y": 30}, {"x": 28, "y": 30}, {"x": 28, "y": 30}]
+      "stride": 10,
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
     },
     "corner": {
       "frames": [8, 9, 10, 11],
@@ -64,18 +65,20 @@
       "frames": [12, 13, 14],
       "durations": [140, 150, 140],
       "loop": true,
-      "mirrorSafe": false,
-      "anchors": [{"x": 28, "y": 30}, {"x": 28, "y": 30}, {"x": 28, "y": 30}]
+      "mirrorSafe": true,
+      "stride": 10,
+      "sharesWith": ["climbDown", "alert"],
+      "anchors": [{"x": 2, "y": 16}, {"x": 2, "y": 16}, {"x": 2, "y": 16}]
     },
     "dance": {
-      "frames": [40, 41, 42, 43],
-      "durations": [160, 160, 160, 160],
+      "frames": [40, 41, 42, 43, 44],
+      "durations": [160, 160, 160, 160, 160],
       "loop": false,
       "mirrorSafe": true,
-      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
     },
     "success": {
-      "frames": [44, 45, 46],
+      "frames": [45, 46, 47],
       "durations": [180, 220, 220],
       "loop": false,
       "mirrorSafe": true,
@@ -89,19 +92,29 @@
       "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
     },
     "exit": {
-      "frames": [56, 57, 58],
-      "durations": [70, 70, 70],
+      "frames": [56, 57, 58, 59],
+      "durations": [70, 70, 70, 90],
       "loop": false,
       "mirrorSafe": true,
-      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
     },
     "sleep": {
-      "frames": [60, 61, 62, 63],
-      "durations": [1800, 1000, 1800, 1000],
+      "frames": [62, 63],
+      "durations": [1800, 1000],
       "loop": true,
       "mirrorSafe": true,
-      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]
-    }
+      "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]
+    },
+    "happy": {"frames": [21, 22, 20], "durations": [110, 110, 110], "loop": true, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "turn": {"frames": [37, 38], "durations": [110, 110], "loop": false, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "climbDown": {"frames": [34, 33, 32], "durations": [140, 150, 140], "loop": true, "mirrorSafe": true, "stride": 10, "anchors": [{"x": 2, "y": 16}, {"x": 2, "y": 16}, {"x": 2, "y": 16}]},
+    "hang": {"frames": [7, 60, 61], "durations": [140, 180, 220], "loop": true, "mirrorSafe": true, "stride": 10, "anchors": [{"x": 16, "y": 2}, {"x": 16, "y": 2}, {"x": 16, "y": 2}]},
+    "notice": {"frames": [39, 38], "durations": [180, 220], "loop": false, "mirrorSafe": true, "sharesWith": ["turn"], "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "alert": {"frames": [11, 12], "durations": [140, 180], "loop": false, "mirrorSafe": true, "sharesWith": ["corner"], "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "brave": {"frames": [8, 9], "durations": [150, 180], "loop": false, "mirrorSafe": true, "sharesWith": ["corner"], "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "cower": {"frames": [53, 54], "durations": [180, 220], "loop": false, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "victory": {"frames": [45, 46, 47], "durations": [160, 180, 220], "loop": false, "mirrorSafe": true, "sharesWith": ["success"], "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}, {"x": 16, "y": 30}]},
+    "carried": {"frames": [51, 55], "durations": [180, 220], "loop": true, "mirrorSafe": true, "anchors": [{"x": 16, "y": 30}, {"x": 16, "y": 30}]}
   },
   "fallbacks": {
     "peek": "idle",
@@ -109,7 +122,8 @@
     "land": "idle",
     "walk": "idle",
     "corner": "idle",
-    "climb": "idle",
+    "climb": "idle", "climbDown": "climb", "hang": "idle", "notice": "idle", "alert": "idle",
+    "brave": "dance", "cower": "failure", "victory": "success", "carried": "idle",
     "dance": "idle",
     "success": "idle",
     "failure": "idle",

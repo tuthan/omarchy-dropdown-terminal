@@ -18,10 +18,11 @@ corgi. The renderer and controller are species-agnostic; each pack is
 validated independently before its manifest is loaded. This keeps new pets
 cheap to add without allowing one sprite sheet to redefine the contract.
 
-Pet interaction — click, drag, feed — is explicitly out of scope. The overlay
-has an empty input region by construction (Phase 1.1), and that is what keeps
-the terminal usable. Making the pet clickable means punching a hole in the input
-mask at the window edge, exactly where the terminal's own resize handles live.
+Pet interaction — click, drag, feed — was explicitly out of scope for Phase 3.
+Phase 5 supersedes that boundary for bounded click-and-hold petting; drag and
+other interactions remain out of scope. During Phase 3 the overlay had an empty
+input region by construction (Phase 1.1), which kept the terminal usable. Phase
+5 now punches only the bounded, resize-safe hole described in its item 5.0.
 That is a separate feature with its own input-routing design.
 
 ## Animation and personality contract
@@ -303,9 +304,10 @@ hyprctl keyword monitor HEADLESS-2,1920x1080@60,3440x0,1.25
 
 ## Out of scope
 
-- Any pet interaction: click, drag, feed, pet.
+- Drag, feed, and other pet interactions beyond Phase 5's bounded click-and-hold petting.
 - Pet persistence across shell reloads. The pet re-enters on the next summon;
-  remembering where it was standing is not worth the state.
+  remembering where it was standing was judged not worth the state. Superseded
+  by Phase 6 item 6.3, which adds a single-writer runtime document for it.
 
 ## Resolved implementation questions
 
