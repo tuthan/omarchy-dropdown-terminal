@@ -63,6 +63,14 @@ export -f hyprctl
 export -f notify-send
 export hypr_config_errors
 
+# Python subprocesses need executable stubs; each wrapper dispatches to the
+# exported Bash fixture function so no test contacts the real compositor.
+mkdir -p "$runtime_dir/test-bin"
+printf '#!/usr/bin/env bash\nhyprctl "$@"\n' > "$runtime_dir/test-bin/hyprctl"
+printf '#!/usr/bin/env bash\nnotify-send "$@"\n' > "$runtime_dir/test-bin/notify-send"
+chmod +x "$runtime_dir/test-bin/"*
+export PATH="$runtime_dir/test-bin:$PATH"
+
 YADTM_LIB_ONLY=1 XDG_RUNTIME_DIR="$runtime_dir" source "$root_dir/bin/omarchy-dropdown-terminal"
 export fixture_clients fixture_monitors
 export -f client_exists client_monitor window_on_screen wait_window_y lua_string
@@ -362,7 +370,7 @@ assert_status "manifest exposes the custom keybinding" jq -e '.barWidget.schema 
 assert_status "panel exposes keybinding controls" grep -Fq 'text: "Apply keybinding"' "$root_dir/Panel.qml"
 assert_status "general controls wrap to the panel width" grep -Fq 'height: childrenRect.height' "$root_dir/Panel.qml"
 assert_status "service passes the selected keybinding to the helper" grep -Fq 'root.keybinding]' "$root_dir/Service.qml"
-assert_status "binding helper validates custom keybindings" grep -Fq 'valid_keybinding()' "$root_dir/bin/omarchy-dropdown-terminal-bind"
+assert_status "binding transactions resist filesystem swaps" python3 -B "$root_dir/tests/test_binding_transaction.py"
 assert_status "hide suppresses the special-workspace out animation" bash -c 'grep -A25 -F "hide_window()" "$1" | grep -Fq "suppress_special_animation"' _ "$root_dir/bin/omarchy-dropdown-terminal"
 assert_false "bash adapter does not capture command text" grep -Fq 'BASH_COMMAND' "$root_dir/shell/bash.yadtm"
 assert_false "bash adapter has no prompt-path external date" grep -Fq 'date ' "$root_dir/shell/bash.yadtm"

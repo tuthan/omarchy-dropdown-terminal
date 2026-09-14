@@ -74,6 +74,8 @@ Omarchy. After making source changes, rerun the `rsync` command and
 `omarchy-shell shell rescanPlugins`.
 
 The helper requires `jq`, `hyprctl`, and the Omarchy `omarchy` command.
+The optional binding installer also requires Python 3 (standard library only)
+for descriptor-relative config updates.
 The optional pet-pack validator also requires ImageMagick's `identify` decoder
 to verify PNG contents and manifest dimensions.
 
@@ -170,6 +172,12 @@ The **Global keybinding** setting controls the chord used by the optional
 binding installer. It defaults to `CTRL + GRAVE`; use a space-separated chord
 such as `SUPER + SHIFT + T` or `CTRL + code:41`, then choose **Install binding**
 to update the managed line in `~/.config/hypr/bindings.lua`.
+
+The binding helper rejects symlinks in the config file, its parent directories,
+or its lock file. It holds the directories open throughout validation, backup,
+replacement, and rollback, and refuses detected concurrent changes. Backups use
+unique `bindings.lua.bak.<timestamp>.<suffix>` names. If your config uses symlinks,
+add the binding manually in the file you manage instead.
 
 The **Entrance effect** setting controls the decorative finish shown after the
 terminal settles into place. **Off** unloads the effect surface; **Glow** is
