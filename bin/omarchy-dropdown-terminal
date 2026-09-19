@@ -804,17 +804,28 @@ observe_launch_pids() {
 
 new_client_from_json() {
   local clients_json="$1" before="$2" known_pids="$3"
+  # uwsm-app can hand the launch to its daemon, and terminal servers can host
+  # the new window in an existing process. Keep the PID lineage match as the
+  # primary proof; only use the terminal tag when exactly one new client is
+  # eligible, so concurrent windows cannot be selected ambiguously.
   jq -r --arg before "$before" --arg known "$known_pids" '
     ($known | split("\n")) as $known_pids
     | [ .[]
         | select(.address != null)
         | .address as $address
         | select((($before | split("\n")) | index($address)) == null)
+      ] as $new
+    | ([ $new[]
         | .pid as $pid
         | select(($known_pids | index(($pid | tostring))) != null)
-      ]
-    | sort_by(.pid)
-    | .[0].address // empty' <<<"$clients_json"
+      ] | sort_by(.pid) | .[0].address // null) as $by_pid
+    | ([ $new[]
+        | select((.tags // []) | any(type == "string" and startswith("terminal")))
+      ]) as $terminals
+    | if $by_pid != null then $by_pid
+      elif ($terminals | length) == 1 then $terminals[0].address
+      else empty
+      end' <<<"$clients_json"
 }
 
 new_client_from() {

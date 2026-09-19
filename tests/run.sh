@@ -424,6 +424,12 @@ assert_eq "launch adopts the matching process lineage" "0x3000" \
   "$(new_client_from_json "$concurrent_clients" "0x1000" $'4242')"
 assert_eq "launch rejects unrelated concurrent window" "" \
   "$(new_client_from_json "$concurrent_clients" "0x1000" $'7777')"
+uwsm_clients="$(<"$fixture_dir/clients-uwsm.json")"
+assert_eq "launch adopts one new terminal-tagged client without lineage" "0x2000" \
+  "$(new_client_from_json "$uwsm_clients" "0x1000" $'4242')"
+uwsm_ambiguous_clients="$(<"$fixture_dir/clients-uwsm-ambiguous.json")"
+assert_eq "launch rejects ambiguous terminal-tagged clients" "" \
+  "$(new_client_from_json "$uwsm_ambiguous_clients" "0x1000" $'4242')"
 rm -f "$launch_file"
 write_launch_marker "0x1000" 4242 $'4242\n7777'
 assert_status "launch marker stores process lineage" jq -e '.launcherPid == 4242 and .launcherPids == ["4242", "7777"] and .before == ["0x1000"]' "$launch_file"

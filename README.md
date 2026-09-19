@@ -1,395 +1,103 @@
 # Dropdown Terminal
 
-An Omarchy Quickshell plugin for summoning the configured default terminal as a
-fast, focused floating overlay on the current Hyprland workspace—with bounded
-entrance effects, interactive pets, and optional privacy-preserving command
-completion indicators.
+An Omarchy Quickshell plugin that toggles the configured terminal in a
+floating special workspace. It supports custom sizing, entrance effects,
+optional pets, auto-hide, and privacy-preserving command status indicators.
 
 ![Dropdown Terminal preview](preview.png)
 
-## Video Demo
-
-https://github.com/user-attachments/assets/e3437c1d-00c5-451e-b6e4-2c86dd82100a
-
-
-## What's new in 2.3
-
-Phase 7 adds villains and friendship to the optional, bounded pet world:
-
-- A precise tracked command failure can bring a bounded bug or ghost encounter;
-  the villain joins the existing pet input region and never covers the terminal
-  or its resize grab ring.
-- Encounters are capped at 14 seconds, pause completely with `Reduce motion`,
-  and cleanly interrupt on hide, resize, species changes, or dragging.
-- Per-species bond tiers persist in the plugin state directory, with capped
-  petting/celebration gains, bounded decay, bravery odds, visible progress
-  tracks, and a confirmed `Reset bond` action.
-- Friendship unlocks additional authored voice lines and rare unprompted
-  happiness; no voice line from 2.2 is removed or tone-gated.
-- `Playful` activity is available for pets that should move more often: it
-  suppresses idle sleep, uses longer route steps, and checks for a new action
-  about every 1.2–3.6 seconds while visible.
-
-Phase 6 remains the foundation for the whole-border pet, drag/hover controls,
-authored `Kind`, `Sassy`, and `Savage` lines, optional `pw-play`/`paplay` cues,
-and remembered position.
-
-## What's new in 2.0
-
-Version 2.0 focuses the plugin around a calmer, clearer control surface:
-
-- The settings panel is split into `General` and `Animation & pets`, with native
-  keyboard navigation and bounded scrolling.
-- Entrance effects now include `Fire / burn`, `Firework`, `Thunder`, `Snow`, and
-  `Rain`, alongside `Off` and `Glow`.
-- The pet library includes the validated `Penguin`, `Fluffy cat`, and `Corgi`
-  packs.
-- Command tracking remains opt-in, explicit, and privacy-preserving: it records
-  lifecycle metadata only, never command text or terminal output.
-
 ## Install
-
-From the plugin repository:
 
 ```bash
 omarchy plugin add https://github.com/tuthan/omarchy-dropdown-terminal.git --enable
 ```
 
-For local development:
-
-```bash
-plugin_dir="$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal"
-mkdir -p "$(dirname "$plugin_dir")"
-if [ -L "$plugin_dir" ]; then unlink "$plugin_dir"; fi
-mkdir -p "$plugin_dir"
-rsync -a --delete --exclude='.git/' "$PWD"/ "$plugin_dir"/
-omarchy-shell shell rescanPlugins
-omarchy plugin enable io.github.tuthan.dropdown-terminal --section right
-```
-
-Omarchy expects a real plugin directory, so this setup copies the repository
-into the plugin directory instead of symlinking it. The `.git` directory is
-excluded because it is not needed by the runtime and may be protected by
-Omarchy. After making source changes, rerun the `rsync` command and
-`omarchy-shell shell rescanPlugins`.
-
-The helper requires `jq`, `hyprctl`, and the Omarchy `omarchy` command.
-The optional binding installer also requires Python 3 (standard library only)
-for descriptor-relative config updates.
-The optional pet-pack validator also requires ImageMagick's `identify` decoder
-to verify PNG contents and manifest dimensions.
-
-## Design and implementation rules
-
-New work follows the reusable
-[General Omarchy plugin design rules](../plugin-docs/rules/omarchy-plugin-design.md)
-through this repository's [design-rule profile](docs/design-rules.md) and
-[phase plan](../docs-vault/yadtm-Plugin/plan/README.md).
-
-The profile makes truthful state, explicit/reversible external config edits,
-native Omarchy UI tokens, theme ownership, bounded motion, reduced motion, and
-input safety part of each phase's acceptance gate. Phase 0 closes the original
-settings-reload, mutation-confirmation, and stacked-monitor parking gaps.
+The plugin requires Omarchy, `jq`, `hyprctl`, and the `omarchy` command.
+Python 3 is needed by the optional binding installer; ImageMagick is needed
+only to validate custom pet packs.
 
 ## Update
-
-For a plugin installed from GitHub, update it with:
 
 ```bash
 omarchy plugin update io.github.tuthan.dropdown-terminal --yes
 omarchy restart shell
 ```
 
-For local development, recopy the repository into the real plugin directory
-and rescan it:
+## Local development
+
+Omarchy loads plugins from a real directory, so copy the repository instead
+of symlinking it:
 
 ```bash
-rsync -a --delete --exclude='.git/' "$PWD"/ "$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal"/
+plugin_dir="$HOME/.config/omarchy/plugins/io.github.tuthan.dropdown-terminal"
+[ -L "$plugin_dir" ] && unlink "$plugin_dir"
+mkdir -p "$plugin_dir"
+rsync -a --delete --exclude='.git/' ./ "$plugin_dir/"
 omarchy-shell shell rescanPlugins
+omarchy plugin enable io.github.tuthan.dropdown-terminal --section right
 ```
 
-## Hotkey
+Repeat the `rsync` and rescan commands after source changes.
 
-The plugin registers `io.github.tuthan.dropdown-terminal:toggle` with Hyprland. The easiest
-persistent binding is one line in `~/.config/hypr/bindings.lua`:
+## Keybinding and controls
+
+The default binding is `CTRL + GRAVE`. Add it to
+`~/.config/hypr/bindings.lua`:
 
 ```lua
 hl.bind("CTRL + GRAVE", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))
 ```
 
-This is deliberately the only Hyprland configuration required. The plugin
-does not replace or hard-code the user's terminal emulator.
+The settings panel can install a different chord with conflict detection and
+an explicit confirmation. Middle-click the bar icon to open it; left-click
+toggles the terminal and right-click reviews the binding.
 
-For a temporary test without editing a file, run:
+The panel controls:
+
+- terminal width, height, border color, and slide-from-top animation;
+- auto-hide, focus-through, icon visibility, and the bar icon;
+- finite entrance effects and reduced motion;
+- pets, roaming, interaction, voice, sound, villains, and bond state; and
+- generic urgency and precise command completion indicators.
+
+The main settings can also be changed from a terminal:
 
 ```bash
-hyprctl eval 'hl.bind("CTRL + GRAVE", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))'
+omarchy bar set io.github.tuthan.dropdown-terminal widthPercent 90 --json
+omarchy bar set io.github.tuthan.dropdown-terminal heightPercent 45 --json
+omarchy bar set io.github.tuthan.dropdown-terminal autoHideOnFocusLoss true --json
+omarchy bar set io.github.tuthan.dropdown-terminal showIcon false --json
+omarchy restart shell
 ```
 
-The runtime version is lost when Hyprland reloads; use the `bindings.lua` line
-for a persistent shortcut. To use a physical keycode instead of the keyboard
-symbol, for example:
+## Command status
 
-```lua
-hl.bind("CTRL + code:41", hl.dsp.global("io.github.tuthan.dropdown-terminal:toggle"))
-```
+Generic urgency works without shell changes. For precise `running`,
+`succeeded`, and `failed` states, enable **Command tracking** and install the
+guarded integration for Bash, Zsh, or Fish from the settings panel.
 
-The bar icon also provides shortcuts: left-click it to toggle the terminal,
-middle-click it to open the settings panel, or right-click it to review the
-configured binding. The `General` tab lets you save a custom Hyprland chord,
-such as `SUPER + SHIFT + T`, and install it through the same explicit
-confirmation flow. The preflight names the exact chord, target, effect, backup,
-and removal path, and lists existing conflicts before offering an explicit “Add
-anyway” action; only confirmation performs the atomic edit and Hyprland reload.
-
-## Configuration
-
-Middle-click the bar icon to open the settings panel:
-
-![Dropdown Terminal settings panel](settings-panel.png)
-
-The panel is organized into two tabs to keep related controls together:
-
-- `General` contains terminal sizing and behavior, urgency, command tracking,
-  and shell integration.
-- `Animation & pets` contains entrance effects, intensity, pet selection and
-  activity, plus reduced-motion controls.
-
-Long effect lists stay inside the panel's scrollable content area, so the
-settings card remains usable at smaller heights.
-
-The Animation & pets tab also exposes tap-and-hold petting, villains, bond
-tiers, top-edge or whole-border roaming, pet activity, and reduced-motion
-controls.
-
-The bar widget settings include `Show icon`. Turn it off to hide the icon while
-keeping the global shortcut and terminal service active.
-
-The **Bar icon** setting accepts a Nerd Font glyph or short text and shows a
-live preview in the settings panel. The default is the terminal glyph `\uF120`.
-
-The **Global keybinding** setting controls the chord used by the optional
-binding installer. It defaults to `CTRL + GRAVE`; use a space-separated chord
-such as `SUPER + SHIFT + T` or `CTRL + code:41`, then choose **Install binding**
-to update the managed line in `~/.config/hypr/bindings.lua`.
-
-The binding helper rejects symlinks in the config file, its parent directories,
-or its lock file. It holds the directories open throughout validation, backup,
-replacement, and rollback, and refuses detected concurrent changes. Backups use
-unique `bindings.lua.bak.<timestamp>.<suffix>` names. If your config uses symlinks,
-add the binding manually in the file you manage instead.
-
-The **Entrance effect** setting controls the decorative finish shown after the
-terminal settles into place. **Off** unloads the effect surface; **Glow** is
-enabled by default. The other finite treatments are **Fire / burn**,
-**Firework**, **Thunder**, **Snow**, and **Rain**. **Effect intensity** ranges
-from 0 to 100 in steps of 10. Every effect is click-through, follows the
-terminal's output and corner radius, and does not represent command success,
-failure, or attention.
-
-### Pets and reduced motion
-
-The pet is disabled by default. Choose the **Penguin**, **Fluffy cat**, or
-**Corgi** pack when enabling it. **Respond to clicks** adds a bounded sprite-only
-input region: tap or hold the pet for its authored happy reaction, while
-clicks in the terminal and its resize grab ring still reach the terminal.
-**Top edge** is the default roaming mode; **Whole border** is available when a pack
-supplies wall-safe climb and descending art. **Drag to move** picks the pet up
-with a carried pose and snaps release to the nearest allowed edge. **Pointer
-awareness** is Off by default; an enabled halo intentionally consumes clicks in
-its pixels, so the panel explains that trade-off. On focus permits focus
-reactions, Always visible also permits infrequent walking and sleep, Playful
-uses more frequent, longer walks without idle sleep, and Celebrations limits it
-to qualifying precise command results from the explicit shell integration. Set
-**Whole border** under **Roaming** if the pet should climb or slide down the
-terminal sides and travel along the bottom edge; **Top edge** keeps it on the
-top border.
-Generic urgency never produces a success or failure pet reaction.
-
-**Villains** are Off only when explicitly disabled and otherwise require the
-pet, command tracking, and the terminal being visible when a qualifying
-failure occurs. Exit statuses 1–127 bring a bug; signal-class failures bring a
-ghost. A quick `command not found` is normally below the 5-second default
-threshold, so set **Notify after (ms)** to `0` if short failures should spawn a
-bug too. Encounters stay on the top edge, are at most one at a time, and never
-turn hidden failures into a new arrival.
-
-**Voice** is Off by default and shows only authored lines based on petting or
-precise qualifying results. Lines never contain command text and never repeat
-within a five-line window. **Sound** is also Off by default and is loaded only
-when selected; missing players are reported as unavailable. **Remember position**
-stores a short-lived, versioned state document under the runtime directory and
-restores it only for the current terminal owner and species.
-
-**Bond** is a private per-species 0–100 score under the state directory. It
-shows the tier word, number, and track in the panel; a missing file starts at
-`Wary`, while an unreadable or future-version file stays `Unavailable` and is
-never overwritten. Bond changes bravery, unlock extra voice lines by
-`peakTier`, and make the `Inseparable` pet occasionally happy while always
-visible.
-
-**Reduce motion** holds the pet on a static pose, suppresses entrance particles,
-and changes the Phase 2 bar indicator to a colored dot. It is plugin-local
-because this host does not expose a reliable Omarchy-wide reduced-motion
-preference.
-
-### Command completion indicator
-
-The bar icon can show four semantic states: `running`, generic `attention`,
-`succeeded`, and `failed`. The generic attention state uses the managed
-terminal's Hyprland urgency flag and requires no shell changes; it means only
-that the terminal needs attention, not that a command succeeded or failed.
-
-For precise completion status, enable **Command tracking** in the settings
-panel. Enabling the preference does not edit a shell startup file. It reveals
-an explicit, cancel-first **Install shell integration** action for the current
-login shell (Bash, Zsh, or Fish). The confirmation names the exact rc file and
-guarded source block, creates a timestamped `cp -p` backup before an atomic
-replacement, and the helper verifies the exact block after the edit. The
-matching remove action deletes only that marked block.
-
-The hooks append one short, newline-terminated record per event to the private
-per-login journal at:
+The integration writes short lifecycle records to:
 
 ```text
 $XDG_RUNTIME_DIR/io.github.tuthan.dropdown-terminal.events
 ```
 
-They use shell builtins on the prompt path and never store command text,
-terminal output, or prompt output. Commands shorter than the configurable
-**Command notify threshold** (5 seconds by default) do not notify. Exit status
-130 is ignored by default; **Treat Ctrl-C as failure** changes that policy.
-Foreground commands only are tracked: a command sent to the background is
-complete from the prompt's point of view, while true job-control notifications
-are outside this phase.
-
-The helper exports the journal path and a per-launch session token only to the
-terminal it starts. If a terminal server discards per-launch environment, its
-precise command tracking is unsupported; the generic urgency indicator remains
-available. Showing or focusing the dropdown clears unread completion state.
-
-From a terminal, the same setting can be changed with:
-
-```bash
-# Hide the icon
-omarchy bar set io.github.tuthan.dropdown-terminal showIcon false --json
-
-# Show the icon again
-omarchy bar set io.github.tuthan.dropdown-terminal showIcon true --json
-```
-
-The `--json` flag is required so `false` and `true` are stored as boolean
-values rather than text. After changing this setting for the first time, restart
-the shell to apply it:
-
-```bash
-omarchy restart shell
-```
-
-Auto-hide can also be changed from a terminal:
-
-```bash
-# Enable auto-hide on focus loss
-omarchy bar set io.github.tuthan.dropdown-terminal autoHideOnFocusLoss true --json
-
-# Disable it
-omarchy bar set io.github.tuthan.dropdown-terminal autoHideOnFocusLoss false --json
-```
-
-The default auto-hide delay is 500 ms and can be adjusted from the widget
-settings or with:
-
-```bash
-omarchy bar set io.github.tuthan.dropdown-terminal autoHideDelayMs 500 --json
-```
-
-### Focus through the dropdown
-
-The settings panel also offers **Focus through**. When enabled, it adds this
-plugin-managed override to `~/.config/hypr/input.lua` and reloads Hyprland:
-
-```lua
-hl.config({
-  input = {
-    special_fallthrough = true,
-  },
-})
-```
-
-This lets normal windows receive pointer focus while the floating special
-workspace is visible, making auto-hide work naturally with focus-follows-mouse.
-The option affects all floating special workspaces and removes only its own
-marked override when disabled.
-
-The terminal size and border can also be adjusted from the widget settings:
-
-```bash
-omarchy bar set io.github.tuthan.dropdown-terminal widthPercent 90 --json
-omarchy bar set io.github.tuthan.dropdown-terminal heightPercent 45 --json
-omarchy bar set io.github.tuthan.dropdown-terminal borderColor 'rgb(ff8800)' --json
-```
-
-### Slide direction
-
-Hyprland's `slidevert` special-workspace animation always reveals upward, and
-its animation styles take no direction argument, so a special workspace cannot
-be told to drop downward. **Slide down from top** (on by default) works around
-this: the terminal is parked above the top edge as the workspace is revealed and
-then animated down into place, so it drops in like a Quake console.
-
-```bash
-# Use Hyprland's native (upward) special-workspace animation instead
-omarchy bar set io.github.tuthan.dropdown-terminal slideFromTop false --json
-```
-
-While a summon is in flight the plugin temporarily overrides the global
-`specialWorkspace` animation node to an imperceptible speed and restores it
-immediately afterwards, including if it is interrupted. The child
-`specialWorkspaceIn` / `specialWorkspaceOut` nodes are never touched: they
-resolve their duration through the parent, so suppressing the reveal does not
-turn them into explicit overrides. Suppression requires the `specialWorkspace`
-node to be explicitly configured (every Omarchy install sets it in
-`looknfeel.lua`); if it only inherits defaults, the native reveal is used
-instead, because the runtime API cannot restore inheritance once a node has
-been written. This is a runtime override only: nothing is written to your
-Hyprland config, and any `hyprctl reload` clears it. The suppression lasts a
-few hundred milliseconds and is shared with other special workspaces such as
-Omarchy's `SUPER + S` scratchpad, which is near-instant for that brief window.
-Concurrent invocations of the helper are serialized with a lockfile.
-
-The default border color is `theme`, which leaves the border under Omarchy and
-Hyprland theme control. Use a Hyprland `rgb(...)` or `rgba(...)` value for a
-custom border. Size and custom border settings are reapplied the next time the
-terminal is toggled.
-
-Hiding slides the terminal up past the top edge and then toggles its named
-Hyprland special workspace away. With **Slide down from top** turned off, the
-workspace is toggled directly and Omarchy's configured special-workspace
-animation is used instead.
+It never records command text, terminal output, or prompt output. Tracking is
+opt-in, and commands shorter than the configured notification threshold are
+ignored by default. If a terminal server drops the per-launch environment,
+precise tracking is unavailable but generic urgency still works.
 
 ## Behavior
 
-- First activation runs `omarchy launch terminal`, preserving the configured
-  default terminal and current working directory behavior.
-- The new window stays on the current workspace, floats at the configured size
-  (90% × 45% by default), and is
-  centered near the top edge so the current desktop remains visible behind it.
-- Later activations toggle the same terminal in the named special workspace
-  `special:dropdown-terminal`, without changing the user's current workspace.
-- With multiple monitors, summoning while the terminal is visible on another
-  screen moves it to the focused screen instead, resized and positioned for
-  that screen's dimensions and scale.
-- Summoning parks the window above the focused monitor's top edge in the same
-  synchronous compositor call as the reveal. Hyprland re-centers a floating
-  window whenever its special workspace is revealed, and rejects any position
-  whose center falls outside the monitor, so the park cannot be done ahead of
-  time. Geometry is anchored to the relevant monitor's global origin, and the
-  on-screen check uses the window's owner monitor so a vertically stacked
-  neighbour cannot misclassify a parked rectangle.
-- Existing dropdown windows are detected after a shell restart, so they are
-  reused instead of duplicated.
-- Runtime state is stored in `XDG_RUNTIME_DIR` when it is private; if that is
-  unavailable, the plugin creates a private per-user directory under `/tmp`.
+- The first toggle runs `omarchy launch terminal`, preserving the configured
+  default terminal.
+- The terminal is floated near the top of the current monitor at 90% × 45% by
+  default and reused in `special:dropdown-terminal`.
+- Toggling from another monitor moves and resizes the same terminal there.
+- Existing dropdown clients are recovered after a shell restart; a second
+  terminal is not created unnecessarily.
+- Runtime state is kept in a private `XDG_RUNTIME_DIR` directory, or in a
+  private per-user directory under `/tmp` when needed.
 
 ## Remove
 
