@@ -6,6 +6,10 @@ optional pets, auto-hide, and privacy-preserving command status indicators.
 
 ![Dropdown Terminal preview](preview.png)
 
+## Video demo
+
+https://github.com/user-attachments/assets/e3437c1d-00c5-451e-b6e4-2c86dd82100a
+
 ## Install
 
 ```bash
