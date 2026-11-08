@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 BarWidget {
@@ -30,12 +31,12 @@ BarWidget {
   }
   readonly property color indicatorColor: {
     if (service.indicatorState === "attention" || service.indicatorState === "failed")
-      return root.bar ? root.bar.urgent : Color.urgent
+      return root.bar ? root.bar.urgent : Commons.Color.urgent
     if (service.indicatorState === "running")
-      return Color.muted
+      return Commons.Color.muted
     if (service.indicatorState === "succeeded")
-      return Color.accent
-    return root.bar ? root.bar.barForeground : Color.foreground
+      return Commons.Color.accent
+    return root.bar ? root.bar.barForeground : Commons.Color.foreground
   }
   readonly property string indicatorTooltip: {
     if (service.indicatorState === "running") return "running · Dropdown Terminal command in progress"
@@ -226,14 +227,14 @@ BarWidget {
           height: Style.space(9)
           radius: width / 2
           color: root.indicatorColor
-          border.color: root.bar ? root.bar.background : Color.background
+          border.color: root.bar ? root.bar.background : Commons.Color.background
           border.width: 1
 
           Text {
             anchors.centerIn: parent
             visible: service.commandUnreadCount > 1
             text: service.commandUnreadCount > 9 ? "9" : String(service.commandUnreadCount)
-            color: root.bar ? root.bar.background : Color.background
+            color: root.bar ? root.bar.background : Commons.Color.background
             font.family: button.fontFamily
             font.pixelSize: Math.max(Style.font.bodySmall, Style.space(6))
             horizontalAlignment: Text.AlignHCenter

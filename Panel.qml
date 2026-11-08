@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 Panel {
@@ -19,7 +20,7 @@ Panel {
   property bool bindingPreflightWaiting: false
   readonly property bool confirming: confirmKind !== ""
   readonly property var barIdentity: hostWidget || root
-  readonly property color contentForeground: bar ? bar.foreground : Color.foreground
+  readonly property color contentForeground: bar ? bar.foreground : Commons.Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string borderSetting: String(root.setting("borderColor", "theme"))
   readonly property bool slideFromTop: root.setting("slideFromTop", true) !== false
@@ -99,7 +100,7 @@ Panel {
   property string settingsTab: "general"
   readonly property color pickerColor: {
     var match = root.borderSetting.match(/^rgb\(([0-9a-fA-F]{6})\)$/)
-    return match ? Qt.color("#" + match[1]) : Color.accent
+    return match ? Qt.color("#" + match[1]) : Commons.Color.accent
   }
 
   readonly property string hyprConfigRoot: (Quickshell.env("XDG_CONFIG_HOME") ||
@@ -521,7 +522,7 @@ Panel {
         ]
         value: root.settingsTab
         foreground: root.contentForeground
-        accent: Color.accent
+        accent: Commons.Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setSettingsTab(value) }
       }
@@ -619,7 +620,7 @@ Panel {
           ? "Use letters, numbers, modifiers, +, commas, colons, underscores, and hyphens."
           : "Enter a non-empty Hyprland key chord using only safe key names and separators."
         color: root.isKeybindingValid(keybindingField.text)
-          ? Util.alpha(root.contentForeground, 0.5) : Color.urgent
+          ? Util.alpha(root.contentForeground, 0.5) : Commons.Color.urgent
         font.family: root.contentFontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
@@ -732,7 +733,7 @@ Panel {
           width: Style.space(26)
           height: Style.space(26)
           radius: Style.cornerRadius
-          color: root.borderSetting === "theme" ? Color.accent : root.pickerColor
+          color: root.borderSetting === "theme" ? Commons.Color.accent : root.pickerColor
           border.color: root.contentForeground
           border.width: 1
         }
@@ -862,7 +863,7 @@ Panel {
         ]
         value: root.entranceEffect
         foreground: root.contentForeground
-        accent: Color.accent
+        accent: Commons.Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setEntranceEffect(value) }
       }
@@ -906,7 +907,7 @@ Panel {
           delegate: Text {
             width: parent.width
             text: modelData
-            color: Color.urgent
+            color: Commons.Color.urgent
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
@@ -1011,7 +1012,7 @@ Panel {
         ]
         value: root.petSpecies
         foreground: root.contentForeground
-        accent: Color.accent
+        accent: Commons.Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.persistSettings({ petSpecies: value }) }
       }
@@ -1033,7 +1034,7 @@ Panel {
         ]
         value: root.petActivity
         foreground: root.contentForeground
-        accent: Color.accent
+        accent: Commons.Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setPetActivity(value) }
       }
@@ -1076,13 +1077,13 @@ Panel {
             Rectangle {
               anchors.fill: parent
               radius: Style.cornerRadius
-              color: Util.alpha(Color.popups.border, 0.55)
+              color: Util.alpha(Commons.Color.popups.border, 0.55)
             }
             Rectangle {
               width: parent.width * Math.max(0, Math.min(1, Number(parent.parent.record.bond) / 100))
               height: parent.height
               radius: Style.cornerRadius
-              color: Color.accent
+              color: Commons.Color.accent
             }
           }
           Button {
@@ -1114,7 +1115,7 @@ Panel {
         ]
         value: root.petRoaming
         foreground: root.contentForeground
-        accent: Color.accent
+        accent: Commons.Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setPetRoaming(value) }
       }
@@ -1135,7 +1136,7 @@ Panel {
         ]
         value: root.petVoice
         foreground: root.contentForeground
-        accent: Color.accent
+        accent: Commons.Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setPetVoice(value) }
       }
@@ -1168,7 +1169,7 @@ Panel {
         ]
         value: root.petHoverHalo
         foreground: root.contentForeground
-        accent: Color.accent
+        accent: Commons.Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setPetHoverHalo(value) }
       }
@@ -1188,7 +1189,7 @@ Panel {
         ]
         value: root.petSound
         foreground: root.contentForeground
-        accent: Color.accent
+        accent: Commons.Color.accent
         fontFamily: root.contentFontFamily
         onChanged: function(value) { root.setPetSound(value) }
       }

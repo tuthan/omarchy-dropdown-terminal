@@ -6,6 +6,7 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import qs.Commons
 
+import qs.Commons as Commons
 // Coordinator for the terminal's decorative layers. This component is loaded
 // once per bar/output, but only the output named by the live terminal monitor
 // ever maps its surface.
@@ -84,10 +85,10 @@ Item {
   // Keep alternate palettes tied to Omarchy theme tokens instead of baking in
   // hues that can clash with the active theme. effectColor still honors the
   // user's explicit border-color choice for the shared outline.
-  readonly property color warmColor: Color.urgent
-  readonly property color flameColor: Color.accent
-  readonly property color iceColor: Color.foreground
-  readonly property color rainColor: Color.muted
+  readonly property color warmColor: Commons.Color.urgent
+  readonly property color flameColor: Commons.Color.accent
+  readonly property color iceColor: Commons.Color.foreground
+  readonly property color rainColor: Commons.Color.muted
   readonly property bool reducedMotion: service ? service.reduceMotion === true : false
   readonly property bool serviceTerminalVisible: root.service
     ? root.service.terminalVisible === true : false
@@ -102,7 +103,7 @@ Item {
   function configuredColor(raw) {
     var value = String(raw || "theme")
     var match = value.match(/^(rgb|rgba)\(([0-9a-fA-F]{6}|[0-9a-fA-F]{8})\)$/)
-    if (!match) return Color.accent
+    if (!match) return Commons.Color.accent
     var hex = match[2]
     var channel = function(offset) { return parseInt(hex.substring(offset, offset + 2), 16) / 255 }
     return hex.length === 8
@@ -490,7 +491,7 @@ Item {
               - root.fadeProgress * (Style.space(8) + (index % 5) * Style.space(4))
             rotation: -26 + (index % 5) * 13
             color: index % 3 === 0 ? root.warmColor
-              : (index % 3 === 1 ? root.flameColor : Color.urgent)
+              : (index % 3 === 1 ? root.flameColor : Commons.Color.urgent)
             opacity: root.variantOpacity * (0.58 + (index % 4) * 0.1)
           }
         }

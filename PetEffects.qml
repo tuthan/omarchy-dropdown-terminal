@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 
+import qs.Commons as Commons
 // Two tiny finite effect slots. They are decorative, bounded, and never
 // intercept input; the controller only triggers them for authored actions.
 Item {
@@ -23,8 +24,8 @@ Item {
   property var recentVoiceLines: []
 
   readonly property bool active: root.burstKind !== "" && !root.reducedMotion && root.progress < 1
-  readonly property color accentColor: Color.accent
-  readonly property color quietColor: Color.muted
+  readonly property color accentColor: Commons.Color.accent
+  readonly property color quietColor: Commons.Color.muted
 
   function showBubble(text, edge) {
     var value = String(text || "").trim()
@@ -172,8 +173,8 @@ Item {
     Rectangle {
       anchors.fill: parent
       radius: Style.cornerRadius
-      color: Util.alpha(Color.background, 0.92)
-      border.color: Color.popups.border
+      color: Util.alpha(Commons.Color.background, 0.92)
+      border.color: Commons.Color.popups.border
       border.width: 1
     }
     Text {
@@ -181,7 +182,7 @@ Item {
       anchors.fill: parent
       anchors.margins: Style.space(8)
       text: root.bubbleText
-      color: Color.foreground
+      color: Commons.Color.foreground
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall
       wrapMode: Text.WordWrap
@@ -192,8 +193,8 @@ Item {
       width: Style.space(6)
       height: Style.space(6)
       rotation: 45
-      color: Color.background
-      border.color: Color.popups.border
+      color: Commons.Color.background
+      border.color: Commons.Color.popups.border
       border.width: 1
       x: parent.width / 2 - width / 2
       y: root.bubbleEdge === "bottom" ? -width / 2 : parent.height - width / 2
